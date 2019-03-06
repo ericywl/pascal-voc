@@ -96,5 +96,5 @@ class PascalVOC:
 
 if __name__ == '__main__':
     pv = PascalVOC('./VOCdevkit/VOC2012/')
-    dataset = 'trainval'
-    print(df.head())
+    dset = 'trainval'
+    fnames, lbls = pv.imgs_to_fnames_labels(dset)
