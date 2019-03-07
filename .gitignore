@@ -1,1 +1,6 @@
+# Dataset
 VOCdevkit/
+
+# Python files
+__pycache__/
+.python-version

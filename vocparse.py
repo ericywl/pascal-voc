@@ -1,11 +1,6 @@
-import pandas as pd
 import os
-#from bs4 import BeautifulSoup
-#from more_itertools import unique_everseen
 import numpy as np
-#import matplotlib.pyplot as plt
-#import skimage
-#from skimage import io
+import pandas as pd
 
 
 class PascalVOC:
@@ -47,7 +42,7 @@ class PascalVOC:
         Summary:
         Args:
             cat_name (string): Category name as a string (from list_image_sets())
-            dataset (string): "train", "val", "train_val", or "test" (if available)
+            dataset (string): "train", "val", "trainval", or "test" (if available)
         Returns:
             pandas dataframe: pandas DataFrame of all filenames from that category
         """
@@ -67,7 +62,7 @@ class PascalVOC:
             as a list rather than a pandas dataframe.
         Args:
             cat_name (string): Category name as a string (from list_image_sets())
-            dataset (string): "train", "val", "train_val", or "test" (if available)
+            dataset (string): "train", "val", "trainval", or "test" (if available)
         Returns:
             list of srings: all filenames from that category
         """
@@ -76,25 +71,46 @@ class PascalVOC:
         return df['filename'].values
 
     def imgs_as_df(self, dataset):
+        """
+        Summary:
+            Get a pandas dataframe with filenames and multi-hot labels
+        Args:
+            dataset (string): "train", "val" or "trainval"
+        Returns:
+            Dataframe of filename and multi-hot labels
+        """
         df = None
         for cat_name in self.list_image_sets():
             if df is None:
-                df = pv._imgs_from_category(cat_name, dataset)
+                df = self._imgs_from_category(cat_name, dataset)
                 df = df.replace({-1: 0})
             else:
-                new_col = pv._imgs_from_category(cat_name, dataset)
+                new_col = self._imgs_from_category(cat_name, dataset)
                 new_col = new_col.replace({-1: 0})
                 df = pd.merge(df, new_col, on='filename')
             df.rename(columns={'true': cat_name}, inplace=True)
         return df
 
     def imgs_to_fnames_labels(self, dataset):
+        """
+        Summary:
+            Get lists of filenames and multi-hot labels
+        Args:
+            dataset (string): "train", "val" or "trainval"
+        Returns:
+            A 2-tuple with list of filenames and list of multi-hot labels
+        """
         df = self.imgs_as_df(dataset)
         filenames = df['filename'].tolist()
         labels = df.drop(['filename'], axis=1).values.tolist()
+        filenames = [
+            os.path.join(self.img_dir ,f) + ".jpg" for f in filenames]
         return filenames, labels
 
 if __name__ == '__main__':
     pv = PascalVOC('./VOCdevkit/VOC2012/')
     dset = 'trainval'
     fnames, lbls = pv.imgs_to_fnames_labels(dset)
+    for cname in pv.list_image_sets():
+        arr = pv.imgs_from_category_as_list(cname, dset)
+        print(cname, len(arr))
