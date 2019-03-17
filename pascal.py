@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.utils.data as tdata
 import torchvision.models as models
 import torchvision.transforms as transforms
+import torchnet.meter as meter
 
 from vocparse import PascalVOC
 
@@ -63,6 +64,8 @@ class ImageDataset(torch.utils.data.Dataset):
 
 def train(model, device, train_loader, criterion, optimizer, epoch, loss_arr):
     """Train the model"""
+    AP=torch.zeros(NUM_CLASSES)
+
     model.train(mode=True)
     train_loss = 0
     print(f"Train epoch: {epoch}")
@@ -92,6 +95,7 @@ def train(model, device, train_loader, criterion, optimizer, epoch, loss_arr):
 
 def val(model, device, val_loader, criterion, best_loss, best_weights, loss_arr):
     """Perform validation to choose the best weights from epochs"""
+    AP=torch.zeros(NUM_CLASSES)
     model.train(mode=False)
     val_loss = 0
     true_pos, false_pos = 0, 0
@@ -108,6 +112,9 @@ def val(model, device, val_loader, criterion, best_loss, best_weights, loss_arr)
             val_loss += criterion(outputs, labels).item()
             # TODO: Calculate prediction
             # TODO: Calculate precision using TP, FP, TN, FN
+            mtr = meter.APMeter()
+            mtr.add(outputs,labels)
+            AP+=mtr.value()
     val_loss /= len(val_loader)
     print(f"Average validation loss: {val_loss}")
     loss_arr.append(val_loss)
@@ -115,6 +122,8 @@ def val(model, device, val_loader, criterion, best_loss, best_weights, loss_arr)
     if (best_loss < 0) or (val_loss < best_loss):
         best_loss = val_loss
         best_weights = model.state_dict()
+    print(AP/len(val_loader.dataset))
+    
     return best_weights
 
 # =================================== #
