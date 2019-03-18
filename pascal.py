@@ -1,6 +1,7 @@
 import numpy as np
 import PIL
 import matplotlib.pyplot as plt
+from pprint import pprint
 
 import torch
 import torch.nn as nn
@@ -76,7 +77,7 @@ class PascalClassifier:
         """Train the model"""
         self.model.train(mode=True)
         train_loss = 0
-        print("Train:")
+        print("TRAIN:")
         for batch_id, (features, labels) in enumerate(train_loader):
             features, labels = features.to(self.device), labels.to(self.device)
             optimizer.zero_grad()
@@ -93,8 +94,12 @@ class PascalClassifier:
             loss.backward()
             optimizer.step()
             if batch_id % 200 == 0 or batch_id == len(train_loader) - 1:
+                if batch_id == len(train_loader) - 1:
+                    num = len(train_loader.dataset)
+                else:
+                    num = batch_id * len(features)
                 print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
-                    batch_id * len(features), len(train_loader.dataset),
+                    num, len(train_loader.dataset),
                     100. * batch_id / len(train_loader), loss.item()))
         train_loss /= len(train_loader)
         print(f"Average training loss: {train_loss}")
@@ -102,14 +107,13 @@ class PascalClassifier:
 
     def val(self, val_loader, criterion):
         """Perform validation to choose the best weights from epochs"""
-        AP = torch.zeros(NUM_CLASSES)
-        output_all=np.zeros(NUM_CLASSES)
-        labels_all=np.zeros(NUM_CLASSES)
-
+        # AP = torch.zeros(NUM_CLASSES)
+        outputs_all = torch.zeros(0, NUM_CLASSES).to(self.device)
+        labels_all = torch.zeros(0, NUM_CLASSES).to(self.device)
         ap_scikit = 0
         self.model.train(mode=False)
         val_loss = 0
-        print("Val:")
+        print("VAL:")
         for batch_id, (features, labels) in enumerate(val_loader):
             with torch.no_grad():
                 features = features.to(self.device)
@@ -123,17 +127,17 @@ class PascalClassifier:
                     outputs = self.model(features)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
-                # Calculate precision
+                # Concatenate output and labels to large tensor
                 new_outputs = torch.sigmoid(outputs)
-                mtr = meter.APMeter()
-                mtr.add(new_outputs, labels)
-                AP += mtr.value()
-                ap_scikit += average_precision_score(labels.cpu().detach().numpy().reshape(-1), new_outputs.cpu().detach().numpy().reshape(-1))
-                output_all=np.vstack((output_all,new_outputs.cpu().detach().numpy()))
-                labels_all=np.vstack((labels_all,labels.cpu().detach().numpy()))
-                if batch_id % 200 == 0  or batch_id == len(val_loader) - 1:
+                outputs_all = torch.cat((outputs_all, new_outputs))
+                labels_all = torch.cat((labels_all, labels))
+                if batch_id % 200 == 0 or batch_id == len(val_loader) - 1:
+                    if batch_id == len(val_loader) - 1:
+                        num = len(val_loader.dataset)
+                    else:
+                        num = batch_id * len(features)
                     print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
-                        batch_id * len(features), len(val_loader.dataset),
+                        num, len(val_loader.dataset),
                         100. * batch_id / len(val_loader), loss.item()))
         val_loss /= len(val_loader)
         print(f"Average validation loss: {val_loss}")
@@ -142,21 +146,25 @@ class PascalClassifier:
         if (self._best_loss < 0) or (val_loss < self._best_loss):
             self._best_loss = val_loss
             self.weights = self.model.state_dict()
-        print(AP / len(val_loader.dataset))
-        print(len(val_loader.dataset))
-        print(ap_scikit)
-        output_all=np.delete(output_all,(0),axis=0)
-        labels_all=np.delete(labels_all,(0),axis=0)
-        labels_all=output_all*labels_all
-        tailacc=dict()
-        tmax=output_all.max()
-        eps=(tmax-0.5)/20
-        for t in range(20):
-            threshold = 0.5+eps*t
-            confidence= (output_all>threshold).sum(axis=0)
-            accuracy = ( labels_all>threshold).sum(axis=0)
-            tailacc[threshold]=accuracy/confidence
-        print(tailacc)
+        # Print AP and accuracy
+        ap_scikit = average_precision_score(
+            labels_all.cpu(), outputs_all.cpu())
+        print(f"AP: {ap_scikit}")
+        acc = ((outputs_all > 0.5).float() *
+               labels_all).sum() / labels_all.sum()
+        print(f"Accuracy: {acc}")
+        # Get tail accuracy
+        labels_all = outputs_all * labels_all
+        tailacc = dict()
+        tmax = outputs_all.max()
+        print(tmax)
+        eps = (tmax - 0.5) / NUM_CLASSES
+        for t in range(NUM_CLASSES):
+            threshold = 0.5 + eps * t
+            confidence = (outputs_all > threshold).sum(dim=0)
+            accuracy = (labels_all > threshold).sum(dim=0)
+            tailacc[threshold] = accuracy / confidence
+        pprint(tailacc)
 
     def run_trainval(self, optimizer, criterion, scale=380, crop_sz=360,
                      batch_sz=8, max_epochs=30):
@@ -180,8 +188,10 @@ class PascalClassifier:
         train_dataset = ImageDataset(train_filenames, train_labels,
                                      transform=trf)
         val_dataset = ImageDataset(val_filenames, val_labels, transform=trf)
-        train_loader = tdata.DataLoader(train_dataset, batch_size=batch_sz)
-        val_loader = tdata.DataLoader(val_dataset, batch_size=batch_sz)
+        train_loader = tdata.DataLoader(train_dataset, batch_size=batch_sz,
+                                        shuffle=True)
+        val_loader = tdata.DataLoader(val_dataset, batch_size=batch_sz,
+                                      shuffle=True)
         # Training and validation
         for epoch in range(max_epochs):
             print(f"Epoch {epoch}")
