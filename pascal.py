@@ -59,114 +59,117 @@ class ImageDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.image_paths)
 
-# ======= Train Val functions ======= #
 
+class PascalClassifier:
+    def __init__(self, model, device=None, pretrained_weights=None):
+        self.model = model
+        self.device = device if device else torch.device("cpu")
+        self.weights = pretrained_weights
+        self.model.to(device)
+        # Hidden variables
+        self._best_loss = -1.0
+        self._val_loss_arr = []
+        self._train_loss_arr = []
 
-def train(model, device, train_loader, criterion, optimizer, epoch, loss_arr):
-    """Train the model"""
-    AP=torch.zeros(NUM_CLASSES)
-
-    model.train(mode=True)
-    train_loss = 0
-    print(f"Train epoch: {epoch}")
-    for batch_id, (features, labels) in enumerate(train_loader):
-        features, labels = features.to(device), labels.to(device)
-        optimizer.zero_grad()
-        if FIVE_CROP:
-            bsize, ncrops, chan, height, width = features.size()
-            outputs = model(features.view(-1, chan, height, width))
-            outputs = outputs.view(bsize, ncrops, -1).mean(1)
-        else:
-            outputs = model(features)
-        # Calculate loss
-        loss = criterion(outputs, labels)
-        train_loss += loss.item()
-        # Compute gradient and do SGD step
-        loss.backward()
-        optimizer.step()
-        if batch_id % 100 == 0:
-            print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
-                batch_id * len(features), len(train_loader.dataset),
-                100. * batch_id / len(train_loader), loss.item()))
-    train_loss /= len(train_loader)
-    print(f"Average training loss: {train_loss}")
-    loss_arr.append(train_loss)
-
-
-def val(model, device, val_loader, criterion, best_loss, best_weights, loss_arr):
-    """Perform validation to choose the best weights from epochs"""
-    AP=torch.zeros(NUM_CLASSES)
-    model.train(mode=False)
-    val_loss = 0
-    true_pos, false_pos = 0, 0
-    true_neg, false_neg = 0, 0
-    for features, labels in val_loader:
-        with torch.no_grad():
-            features, labels = features.to(device), labels.to(device)
+    def train(self, train_loader, criterion, optimizer):
+        """Train the model"""
+        self.model.train(mode=True)
+        train_loss = 0
+        print("Train:")
+        for batch_id, (features, labels) in enumerate(train_loader):
+            features, labels = features.to(self.device), labels.to(self.device)
+            optimizer.zero_grad()
             if FIVE_CROP:
                 bsize, ncrops, chan, height, width = features.size()
-                outputs = model(features.view(-1, chan, height, width))
+                outputs = self.model(features.view(-1, chan, height, width))
                 outputs = outputs.view(bsize, ncrops, -1).mean(1)
             else:
-                outputs = model(features)
-            val_loss += criterion(outputs, labels).item()
-            # TODO: Calculate prediction
-            # TODO: Calculate precision using TP, FP, TN, FN
-            mtr = meter.APMeter()
-            mtr.add(outputs,labels)
-            AP+=mtr.value()
-    val_loss /= len(val_loader)
-    print(f"Average validation loss: {val_loss}")
-    loss_arr.append(val_loss)
-    # Replace best_weights with current weights if validation loss is better
-    if (best_loss < 0) or (val_loss < best_loss):
-        best_loss = val_loss
-        best_weights = model.state_dict()
-    print(AP/len(val_loader.dataset))
-    
-    return best_weights
+                outputs = self.model(features)
+            # Calculate loss
+            loss = criterion(outputs, labels)
+            train_loss += loss.item()
+            # Compute gradient and do SGD step
+            loss.backward()
+            optimizer.step()
+            if batch_id % 200 == 0 or batch_id == len(train_loader) - 1:
+                print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
+                    batch_id * len(features), len(train_loader.dataset),
+                    100. * batch_id / len(train_loader), loss.item()))
+        train_loss /= len(train_loader)
+        print(f"Average training loss: {train_loss}")
+        self._train_loss_arr.append(train_loss)
 
-# =================================== #
+    def val(self, val_loader, criterion):
+        """Perform validation to choose the best weights from epochs"""
+        AP = torch.zeros(NUM_CLASSES)
+        self.model.train(mode=False)
+        val_loss = 0
+        print("Val:")
+        for batch_id, (features, labels) in enumerate(val_loader):
+            with torch.no_grad():
+                features = features.to(self.device)
+                labels = labels.to(self.device)
+                if FIVE_CROP:
+                    bsize, ncrops, chan, height, width = features.size()
+                    outputs = self.model(
+                        features.view(-1, chan, height, width))
+                    outputs = outputs.view(bsize, ncrops, -1).mean(1)
+                else:
+                    outputs = self.model(features)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item()
+                # Calculate precision
+                new_outputs = torch.sigmoid(outputs)
+                mtr = meter.APMeter()
+                mtr.add(new_outputs, labels)
+                AP += mtr.value()
+                if batch_id % 200 == 0  or batch_id == len(val_loader) - 1:
+                    print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
+                        batch_id * len(features), len(val_loader.dataset),
+                        100. * batch_id / len(val_loader), loss.item()))
+        val_loss /= len(val_loader)
+        print(f"Average validation loss: {val_loss}")
+        self._val_loss_arr.append(val_loss)
+        # Replace best_weights with current weights if validation loss is better
+        if (self._best_loss < 0) or (val_loss < self._best_loss):
+            self._best_loss = val_loss
+            self.weights = self.model.state_dict()
+        print(AP / len(val_loader.dataset))
 
+    def run_trainval(self, optimizer, criterion, scale=380, crop_sz=360,
+                     batch_sz=8, max_epochs=30):
+        """Run both training and validation for some epochs"""
+        # Calculated means and stds from Pascal VOC
+        means = [0.4603, 0.4384, 0.4051]
+        stds = [0.1576, 0.1561, 0.1611]
+        # Getting train, val filenames and multi-hot labels
+        pv = PascalVOC(DATASET_DIR)
+        train_filenames, train_labels = pv.imgs_to_fnames_labels("train")
+        val_filenames, val_labels = pv.imgs_to_fnames_labels("val")
+        # Loading dataset
+        trf = transforms.Compose([
+            transforms.Resize(scale),
+            transforms.FiveCrop(crop_sz),
+            transforms.Lambda(lambda crops: torch.stack(
+                [transforms.Normalize(means, stds)(
+                    transforms.ToTensor()(crop)) for crop in crops])
+            )
+        ])
+        train_dataset = ImageDataset(train_filenames, train_labels,
+                                     transform=trf)
+        val_dataset = ImageDataset(val_filenames, val_labels, transform=trf)
+        train_loader = tdata.DataLoader(train_dataset, batch_size=batch_sz)
+        val_loader = tdata.DataLoader(val_dataset, batch_size=batch_sz)
+        # Training and validation
+        for epoch in range(max_epochs):
+            print(f"Epoch {epoch}")
+            print("======================")
+            self.train(train_loader, criterion, optimizer)
+            self.val(val_loader, criterion)
 
-def run(model, device, optimizer, criterion):
-    # Image parameters
-    scale = 380
-    crop_sz = 360
-    # Misc parameters
-    batch_sz = 8
-    max_epochs = 20
-    best_loss = -1
-    best_weights = None
-    # Calculated means and stds from Pascal VOC
-    means = [0.4603, 0.4384, 0.4051]
-    stds = [0.1576, 0.1561, 0.1611]
-    # Getting train, val filenames and multi-hot labels
-    pv = PascalVOC(DATASET_DIR)
-    train_filenames, train_labels = pv.imgs_to_fnames_labels("train")
-    val_filenames, val_labels = pv.imgs_to_fnames_labels("val")
-    # Loading dataset
-    trf = transforms.Compose([
-        transforms.Resize(scale),
-        transforms.FiveCrop(crop_sz),
-        transforms.Lambda(lambda crops: torch.stack(
-            [transforms.Normalize(means, stds)(
-                transforms.ToTensor()(crop)) for crop in crops])
-        )
-    ])
-    train_dataset = ImageDataset(train_filenames, train_labels,
-                                 transform=trf)
-    val_dataset = ImageDataset(val_filenames, val_labels, transform=trf)
-    train_loader = tdata.DataLoader(train_dataset, batch_size=batch_sz)
-    val_loader = tdata.DataLoader(val_dataset, batch_size=batch_sz)
-    train_loss_arr, val_loss_arr = [], []
-    # Training and validation
-    model = model.to(device)
-    for epoch in range(max_epochs):
-        train(model, device, train_loader, criterion, optimizer,
-              epoch, train_loss_arr)
-        best_weights = val(model, device, val_loader, criterion, best_loss,
-                           best_weights, val_loss_arr)
+    def predict(self):
+        # TODO: Integrate prediction with GUI
+        pass
 
 
 # ====== Calculating mean and std for dataset ===== #
@@ -215,7 +218,7 @@ def main():
     # Seeding if it's available
     if SEED > 0:
         np.random.seed(SEED)
-        torch.manual_seed(SEED) 
+        torch.manual_seed(SEED)
     # Initialize model
     model = models.resnet18(pretrained=True)
     model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
@@ -225,12 +228,14 @@ def main():
     # Stochastic gradient descent optimizer
     learn_rate = 0.01
     optimizer = torch.optim.SGD(model.parameters(), lr=learn_rate)
-    # Binary cross entropy with logits loss function
+    # Binary cross entropy with logits, weighted loss function
     const = min((CLASS_OCC_DICT.values()))
     weights = torch.Tensor([
         const * 1.0 / co for co in CLASS_OCC_DICT.values()]).to(device)
     criterion = nn.BCEWithLogitsLoss(weight=weights)
-    run(model, device, optimizer, criterion)
+    # Run training and validation
+    pc = PascalClassifier(model, device)
+    pc.run_trainval(optimizer, criterion)
 
 
 if __name__ == "__main__":
