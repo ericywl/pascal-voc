@@ -105,7 +105,7 @@ class PascalClassifier:
         print(f"Average training loss: {train_loss}")
         self._train_loss_arr.append(train_loss)
 
-    def val(self, val_loader, criterion):
+    def val(self, val_loader, criterion, epoch, max_epochs):
         """Perform validation to choose the best weights from epochs"""
         # AP = torch.zeros(NUM_CLASSES)
         outputs_all = torch.zeros(0, NUM_CLASSES).to(self.device)
@@ -153,20 +153,25 @@ class PascalClassifier:
         acc = ((outputs_all > 0.5).float() *
                labels_all).sum() / labels_all.sum()
         print(f"Accuracy: {acc}")
+        # Print tail accuracy
+        if epoch == max_epochs - 1:
+            pprint(self.get_tailacc(outputs_all, labels_all))
+
+    @staticmethod
+    def get_tailacc(outputs_all, labels_all):
         # Get tail accuracy
         labels_all = outputs_all * labels_all
         tailacc = dict()
         tmax = outputs_all.max()
-        print(tmax)
         eps = (tmax - 0.5) / NUM_CLASSES
         for t in range(NUM_CLASSES):
             threshold = 0.5 + eps * t
-            confidence = (outputs_all > threshold).sum(dim=0)
-            accuracy = (labels_all > threshold).sum(dim=0)
+            confidence = (outputs_all > threshold).float().sum(dim=0)
+            accuracy = (labels_all > threshold).float().sum(dim=0)
             tailacc[threshold] = accuracy / confidence
-        pprint(tailacc)
+        return tailacc
 
-    def run_trainval(self, optimizer, criterion, scale=380, crop_sz=360,
+    def run_trainval(self, optimizer, criterion, scale=300, crop_sz=280,
                      batch_sz=8, max_epochs=30):
         """Run both training and validation for some epochs"""
         # Calculated means and stds from Pascal VOC
@@ -197,7 +202,8 @@ class PascalClassifier:
             print(f"Epoch {epoch}")
             print("======================")
             self.train(train_loader, criterion, optimizer)
-            self.val(val_loader, criterion)
+            self.val(val_loader, criterion, epoch, max_epochs)
+            print()
 
     def predict(self):
         # TODO: Integrate prediction with GUI
@@ -267,7 +273,7 @@ def main():
     criterion = nn.BCEWithLogitsLoss(weight=weights)
     # Run training and validation
     pc = PascalClassifier(model, device)
-    pc.run_trainval(optimizer, criterion)
+    pc.run_trainval(optimizer, criterion, max_epochs=30)
 
 
 if __name__ == "__main__":
