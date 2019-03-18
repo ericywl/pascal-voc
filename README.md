@@ -1,4 +1,22 @@
-# dl-voc
+# Pascal VOC Deep Learning Project
 
-Use `tar -xvf VOCtrainval_11-May-2012.tar` to unpack the VOC dataset first,
-then run the Python scripts.
+
+## Setup
+
+Install 2 things before running the code.
+- PyTorch for all things deep-learning
+- PyTorch TorchNet for the average precision measure, avoid reinventing the
+    wheel
+
+```
+pip install torch
+pip install git+https://github.com/pytorch/tnt.git@master
+```
+
+## Instructions
+First, unpack the VOC tarfile, then run the Python scripts.
+
+```
+tar -xvf VOCtrainval_11-May-2012.tar
+python pascal.py
+```
