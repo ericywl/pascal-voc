@@ -10,6 +10,7 @@ import torchvision.transforms as transforms
 import torchnet.meter as meter
 
 from vocparse import PascalVOC
+from sklearn.metrics import average_precision_score
 
 
 DATASET_DIR = "./VOCdevkit/VOC2012/"
@@ -102,6 +103,10 @@ class PascalClassifier:
     def val(self, val_loader, criterion):
         """Perform validation to choose the best weights from epochs"""
         AP = torch.zeros(NUM_CLASSES)
+        output_all=np.zeros(NUM_CLASSES)
+        labels_all=np.zeros(NUM_CLASSES)
+
+        ap_scikit = 0
         self.model.train(mode=False)
         val_loss = 0
         print("Val:")
@@ -123,6 +128,9 @@ class PascalClassifier:
                 mtr = meter.APMeter()
                 mtr.add(new_outputs, labels)
                 AP += mtr.value()
+                ap_scikit += average_precision_score(labels.cpu().detach().numpy().reshape(-1), new_outputs.cpu().detach().numpy().reshape(-1))
+                output_all=np.vstack((output_all,new_outputs.cpu().detach().numpy()))
+                labels_all=np.vstack((labels_all,labels.cpu().detach().numpy()))
                 if batch_id % 200 == 0  or batch_id == len(val_loader) - 1:
                     print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
                         batch_id * len(features), len(val_loader.dataset),
@@ -135,6 +143,20 @@ class PascalClassifier:
             self._best_loss = val_loss
             self.weights = self.model.state_dict()
         print(AP / len(val_loader.dataset))
+        print(len(val_loader.dataset))
+        print(ap_scikit)
+        output_all=np.delete(output_all,(0),axis=0)
+        labels_all=np.delete(labels_all,(0),axis=0)
+        labels_all=output_all*labels_all
+        tailacc=dict()
+        tmax=output_all.max()
+        eps=(tmax-0.5)/20
+        for t in range(20):
+            threshold = 0.5+eps*t
+            confidence= (output_all>threshold).sum(axis=0)
+            accuracy = ( labels_all>threshold).sum(axis=0)
+            tailacc[threshold]=accuracy/confidence
+        print(tailacc)
 
     def run_trainval(self, optimizer, criterion, scale=380, crop_sz=360,
                      batch_sz=8, max_epochs=30):
