@@ -66,8 +66,13 @@ class ImageDataset(torch.utils.data.Dataset):
 class PascalClassifier:
     """Classifier for Pascal VOC"""
 
-    def __init__(self, model, device=None,  weights_path=None, scale=300,
+    def __init__(self, model=None, device=None, weights_path=None, scale=300,
                  crop_sz=280, rotation=30, five_crop=True, means=None, stds=None):
+        if not model:
+            # Initialize model
+            model = models.resnet18(pretrained=True)
+            model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+            model.fc = nn.Linear(512, NUM_CLASSES)
         self.model = model
         self.device = device if device else torch.device("cpu")
         self.weights = torch.load(weights_path) if weights_path else None
@@ -210,8 +215,8 @@ class PascalClassifier:
             tailacc[threshold] = accuracy / confidence
         return tailacc
 
-    def run_trainval(self, optimizer, criterion, batch_sz=8, max_epochs=30,
-                     dataset_dir=DEFAULT_DATASET_DIR):
+    def run_trainval(self, batch_sz=8, max_epochs=30, learn_rate=0.01,
+                     loss_weights=None, dataset_dir=DEFAULT_DATASET_DIR):
         """Run both training and validation for some epochs"""
         # Getting train, val filenames and multi-hot labels
         pv = PascalVOC(dataset_dir)
@@ -226,6 +231,15 @@ class PascalClassifier:
                                         shuffle=True)
         val_loader = tdata.DataLoader(val_dataset, batch_size=batch_sz,
                                       shuffle=True)
+        # Stochastic gradient descent optimizer
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=learn_rate)
+        # Binary cross entropy with logits, weighted loss function
+        if not loss_weights:
+            const = min((CLASS_OCC_DICT.values()))
+            loss_weights = torch.Tensor([
+                const * 1.0 / co for co in CLASS_OCC_DICT.values()
+            ]).to(self.device)
+        criterion = nn.BCEWithLogitsLoss(weight=loss_weights)
         # Training and validation
         for epoch in range(max_epochs):
             print(f"Epoch {epoch}")
@@ -314,23 +328,11 @@ def main():
     """Main function"""
     # Seeding if it's available
     random_seeding(SEED)
-    # Initialize model
-    model = models.resnet18(pretrained=True)
-    model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-    model.fc = nn.Linear(512, NUM_CLASSES)
-    # Initialize CUDA device
+    # Initialize CUDA device 
     device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
-    # Stochastic gradient descent optimizer
-    learn_rate = 0.01
-    optimizer = torch.optim.SGD(model.parameters(), lr=learn_rate)
-    # Binary cross entropy with logits, weighted loss function
-    const = min((CLASS_OCC_DICT.values()))
-    weights = torch.Tensor([
-        const * 1.0 / co for co in CLASS_OCC_DICT.values()]).to(device)
-    criterion = nn.BCEWithLogitsLoss(weight=weights)
     # Run training and validation
-    pc = PascalClassifier(model, device)
-    pc.run_trainval(optimizer, criterion, max_epochs=30)
+    pc = PascalClassifier(device=device)
+    pc.run_trainval(max_epochs=30)
 
 
 if __name__ == "__main__":
