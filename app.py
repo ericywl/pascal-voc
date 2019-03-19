@@ -1,6 +1,7 @@
 import base64
 import re
 import io
+import json
 from flask import Flask, render_template, request, jsonify
 
 from pascal import PascalClassifier
@@ -9,6 +10,15 @@ from pascal import PascalClassifier
 app = Flask(__name__)
 pc = PascalClassifier(weights_path="weights/five_crop_weights.pth")
 classes = list(pc.CLASS_OCC_DICT.keys())
+
+with open("saves/ranks.json") as f:
+    ranks_dict = json.load(f)
+    c_ranks = {
+        int(k) + 1: {
+            "class_name": v["class_name"],
+            "AP": int(v["AP"] * 1e4) / float(1e4)
+        } for k, v in ranks_dict.items()
+    }
 
 
 @app.route("/")
@@ -39,8 +49,17 @@ def predict():
 
 @app.route("/ranks")
 def ranks():
-    return render_template("ranks.html")
+    return render_template("ranks.html", data=c_ranks)
+
+
+@app.route("/ranks/<class_name>")
+def class_ranks(class_name):
+    class_index = classes.index(class_name) + 1
+    if class_index < 1 or class_index > 20:
+        return "", "400 INVALID REQUEST"
+    # TODO: render each class
+    return render_template("class.html")
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
