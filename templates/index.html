@@ -1,0 +1,15 @@
+{% extends "layout.html" %} {% block content %}
+<div class="row marketing">
+    <div class="col-lg-6">
+        <a class="btn btn-lg btn-block btn-outline-primary" href="/predict">
+            Predict labels for new image
+        </a>
+    </div>
+
+    <div class="col-lg-6">
+        <a class="btn btn-lg btn-block btn-outline-primary" href="/ranks">
+            View pre-computed top-ranked predictions
+        </a>
+    </div>
+</div>
+{% endblock %}
