@@ -1,17 +1,18 @@
-import numpy as np
 import PIL
 import random
+import json
 import matplotlib.pyplot as plt
 from pprint import pprint
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.utils.data as tdata
 import torchvision.models as models
 import torchvision.transforms as transforms
+from sklearn.metrics import average_precision_score
 
 from vocparse import PascalVOC
-from sklearn.metrics import average_precision_score
 
 
 DEFAULT_DATASET_DIR = "./VOCdevkit/VOC2012/"
@@ -67,19 +68,26 @@ class PascalClassifier:
     }
 
     def __init__(self, model=None, device=None, weights_path=None, scale=300,
-                 crop_sz=280, rotation=30, five_crop=True, means=None, stds=None):
+                 crop_sz=280, rotation=30, five_crop=True, channel_stats=None):
         if not model:
-            # Initialize model
+            # Initialize default model
             model = models.resnet18(pretrained=True)
             model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
             model.fc = nn.Linear(512, self.NUM_CLASSES)
         self.model = model
         self.device = device if device else torch.device("cpu")
-        self.weights = torch.load(weights_path) if weights_path else None
+        self.weights = torch.load(
+            weights_path, map_location=self.device) if weights_path else None
         self.model.to(device)
         # Calculated means and stds from Pascal VOC
-        self.means = means if means else [0.4603, 0.4384, 0.4051]
-        self.stds = stds if stds else [0.1576, 0.1561, 0.1611]
+        if channel_stats:
+            self.means = channel_stats[0]
+            self.stds = channel_stats[1]
+        else:
+            self.means = [0.4601, 0.4381, 0.4048] if five_crop \
+                else [0.4501, 0.4258, 0.3932]
+            self.stds = [0.1535, 0.1520, 0.1570] if five_crop \
+                else [0.2315, 0.2255, 0.2261]
         # Image parameters
         self._image_params = [scale, crop_sz, rotation]
         self._five_crop = five_crop
@@ -94,10 +102,10 @@ class PascalClassifier:
             ])
         else:
             self._trf = transforms.Compose([
-                transforms.RandomRotation(30),
+                transforms.RandomRotation(self.rotation),
                 transforms.RandomResizedCrop(crop_sz),
                 transforms.ToTensor(),
-                transforms.Normalize(means, stds)
+                transforms.Normalize(self.means, self.stds)
             ])
         # Misc variables
         self._best_loss = -1.0
@@ -254,7 +262,7 @@ class PascalClassifier:
         for epoch in range(max_epochs):
             print(f"Epoch {epoch}")
             print("======================")
-            #self.train(train_loader, criterion, optimizer)
+            self.train(train_loader, criterion, optimizer)
             self.val(val_loader, criterion, epoch, max_epochs)
             print()
         # Save best model weights and loss arrays
@@ -287,19 +295,22 @@ class PascalClassifier:
         # TODO: Integrate prediction with GUI
         return output
 
+
 # ====== Calculating mean and std for dataset ===== #
 # Not used in runtime
 
 
 def get_means_stds(dataset):
     """Get mean and standard deviation, given dataset"""
-    batch_size = 512
+    batch_size = 8
     loader = tdata.DataLoader(dataset, batch_size=batch_size,
                               num_workers=1, shuffle=False)
     means = torch.Tensor([0., 0., 0.]).cuda()
     stds = torch.Tensor([0., 0., 0.]).cuda()
     num_samples = float(len(dataset))
-    for data, _ in loader:
+    # Not the actual stds because it averages across batches
+    # but should be pretty close to the actual values
+    for data, _, _ in loader:
         data = data.cuda()
         batch_size = data.size(0)
         data = data.view(batch_size, data.size(1), -1)
@@ -312,22 +323,102 @@ def get_means_stds(dataset):
     return means, stds
 
 
-def pascal_means_stds(scale, crop_sz):
+def pascal_means_stds(five_crop, scale, crop_sz, rotation):
     """Calculate mean and standard deviation for Pascal VOC"""
     pv = PascalVOC(DEFAULT_DATASET_DIR)
     fnames, labels = pv.imgs_to_fnames_labels("trainval")
-    trf = transforms.Compose([
-        transforms.Resize(scale),
-        transforms.FiveCrop(crop_sz),
-        transforms.Lambda(lambda crops: torch.stack(
-            [transforms.ToTensor()(crop) for crop in crops]).mean(0)
-        )
-    ])
+    if five_crop:
+        trf = transforms.Compose([
+            transforms.Resize(scale),
+            transforms.FiveCrop(crop_sz),
+            transforms.Lambda(lambda crops: torch.stack(
+                [transforms.ToTensor()(crop) for crop in crops]).mean(0)
+            )
+        ])
+    else:
+        trf = transforms.Compose([
+            transforms.RandomRotation(rotation),
+            transforms.RandomResizedCrop(crop_sz),
+            transforms.ToTensor()
+        ])
     dataset = ImageDataset(fnames, labels, transform=trf)
     means, stds = get_means_stds(dataset)
     print(means, stds)
 
 # ================================================= #
+
+
+# ====== Generate json file for Flask web server ===== #
+# Not used in runtime
+
+
+def top_confidence_list():
+    """Rank the top predictions for each class and output as json"""
+    f_names = np.load('saves/five_crop_fnames.npy')
+    outputs_all = torch.load("saves/five_crop_outputs.pth",
+                             map_location=torch.device('cpu'))
+    labels_all = torch.load("saves/five_crop_labels.pth",
+                            map_location=torch.device('cpu'))
+    _, k = outputs_all.shape
+    out_reshape = outputs_all.permute(1, 0)
+    lab_reshape = labels_all.permute(1, 0)
+    pv = PascalVOC(DEFAULT_DATASET_DIR)
+    json_output = dict()
+
+    for i in range(k):
+        ap_scikit = average_precision_score(
+            lab_reshape[i].cpu(), out_reshape[i].cpu())
+        predictions = (out_reshape[i] > 0.5).float() * out_reshape[i]
+        prediction_number = (out_reshape[i] > 0.5).sum()
+        precision, location = torch.sort(predictions, dim=0, descending=True)
+        urls = [f_names[j] for j in location]
+        corrects = [lab_reshape[i][j] for j in location]
+        json_output[i] = {
+            "class_name": pv.list_image_sets()[i],
+            "AP": ap_scikit
+        }
+        json_output[i]["images"] = [
+            {
+                "images_url": urls[j],
+                "confidence":precision[j].item(),
+                "correct":corrects[j].item()
+            } for j in range(prediction_number)
+        ]
+
+    with open('saves/ranks.json', 'w') as outfile:
+        json.dump(json_output, outfile, sort_keys=False,
+                  indent=4, ensure_ascii=False)
+
+# ==================================================== #
+
+
+def plot(name):
+    tail_acc = torch.load(
+        f"saves/{name}_tailacc.pth", map_location=torch.device('cpu'))
+    train_loss = np.load(f"saves/{name}_train_loss.npy")
+    val_loss = np.load(f"saves/{name}_val_loss.npy")
+
+    x = np.arange(len(val_loss))
+    plt.plot(x, val_loss)
+    plt.xlabel("epoch")
+    plt.title(f"{name}_validation_loss")
+    plt.savefig(f"saves/{name}_val_loss.jpg")
+    plt.close()
+    plt.plot(x, train_loss)
+    plt.xlabel("epoch")
+    plt.title(f"{name}_training_loss")
+    plt.savefig(f"saves/{name}_train_loss.jpg")
+    plt.close()
+    x = list()
+    y = list()
+    for (key, values) in tail_acc.items():
+        x.append(key.item())
+        y.append(values.sum().item()/20)
+    plt.plot(x, y)
+    plt.title(f"{name}_average_tail_accuracy")
+    plt.xlabel("threshold")
+    plt.savefig(f"saves/{name}_tail_acc.jpg")
+    plt.close()
 
 
 def random_seeding(seed_value):
@@ -339,36 +430,6 @@ def random_seeding(seed_value):
         torch.cuda.manual_seed_all(seed_value)
 
 
-def test_predict():
-    pc = PascalClassifier(weights_path="weights/five_crop_weights.pth")
-    pc.predict("sofa-cat.jpg")
-    
-def top_confidence_list():
-    """Rank the top predictions for each class and output as json"""
-    f_names=np.load('saves/five_crop_fnames.npy')
-    outputs_all=torch.load("saves/five_crop_outputs.pth",map_location=torch.device('cpu'))
-    labels_all=torch.load("saves/five_crop_labels.pth",map_location=torch.device('cpu'))
-    n,k=outputs_all.shape
-    out_reshape=outputs_all.permute(1,0)
-    lab_reshape=labels_all.permute(1,0)
-    pv = PascalVOC(DEFAULT_DATASET_DIR)
-    json_output=dict()
-    
-    for i in range(k):
-        ap_scikit = average_precision_score(
-            lab_reshape[i].cpu(), out_reshape[i].cpu())
-        predictions = (out_reshape[i]>0.5).float()*out_reshape[i]
-        prediction_number = (out_reshape[i]>0.5).sum()
-        precision,location = torch.sort(predictions,dim=0,descending=True)
-        urls=[f_names[j] for j in location]
-        corrects= [lab_reshape[i][j] for j in location]
-        json_output[i]={"class_name":pv.list_image_sets()[i],"AP":ap_scikit}
-        json_output[i]["images"]=[{"images_url":urls[j],"confidence":precision[j].item(),"correct":corrects[j].item()}for j in range(prediction_number)]
-    
-    with open('saves/ranks.json', 'w') as outfile:
-        json.dump(json_output, outfile, sort_keys = False, indent = 4,ensure_ascii = False)   
-
-
 def main():
     """Main function"""
     # Seeding if it's available
@@ -376,39 +437,12 @@ def main():
     # Initialize CUDA device
     device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
     # Run training and validation
-    pc = PascalClassifier(
-        device=device, weights_path="weights/five_crop_weights.pth")
-    pc.run_trainval(max_epochs=1)
+    pc = PascalClassifier(device=device)
+    pc.run_trainval(max_epochs=30)
 
-def plot(name):
-    tail_acc=torch.load(f"saves/{name}_tailacc.pth",map_location=torch.device('cpu'))
-    train_loss=np.load(f"saves/{name}_train_loss.npy")
-    val_loss=np.load(f"saves/{name}_val_loss.npy")
-    
-    x=np.arange(len(val_loss))
-    plt.plot(x,val_loss)
-    plt.xlabel("epoch")
-    plt.title(f"{name}_validation_loss")
-    plt.savefig(f"saves/{name}_val_loss.jpg")
-    plt.close()
-    plt.plot(x,train_loss)
-    plt.xlabel("epoch")
-    plt.title(f"{name}_training_loss")
-    plt.savefig(f"saves/{name}_train_loss.jpg")
-    plt.close()
-    x=list()
-    y=list()
-    for (key,values) in tail_acc.items():
-        x.append(key.item())
-        y.append(values.sum().item()/20)
-    plt.plot(x,y)
-    plt.title(f"{name}_average_tail_accuracy")
-    plt.xlabel("threshold")
-    plt.savefig(f"saves/{name}_tail_acc.jpg")
-    plt.close()
-    
+
 if __name__ == "__main__":
     main()
-    # test_predict()
     # top_confidence_list()
     # plot("five_crop")
+    # pascal_means_stds(True, 300, 280, 30)
