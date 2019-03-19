@@ -64,6 +64,7 @@ class ImageDataset(torch.utils.data.Dataset):
 
 
 class PascalClassifier:
+    """Classifier for Pascal VOC"""
 
     def __init__(self, model, device=None,  weights_path=None, scale=300,
                  crop_sz=280, rotation=30, five_crop=True, means=None, stds=None):
@@ -192,6 +193,7 @@ class PascalClassifier:
         print(f"Accuracy: {acc}")
         # Print tail accuracy
         if epoch == max_epochs - 1:
+            print("Tailacc:")
             pprint(self.get_tailacc(outputs_all, labels_all))
 
     @staticmethod
@@ -234,9 +236,27 @@ class PascalClassifier:
         # Save best model weights
         torch.save(self.weights, "pascal_weights.pth")
 
-    def predict(self):
+    def predict(self, image_path):
+        """Predict the labels associated with image in image path"""
+        if not self.weights:
+            print("Weights not found, can't do prediction.")
+            return
+        self.model.load_state_dict(self.weights)
+        self.model.eval()
+        image = self._trf(PIL.Image.open(image_path))
+        features = image[None].to(self.device)
+        # Perform  prediction
+        if self._five_crop:
+            bsize, ncrops, chan, height, width = features.size()
+            outputs = self.model(
+                features.view(-1, chan, height, width))
+            outputs = outputs.view(bsize, ncrops, -1).mean(1)
+        else:
+            outputs = self.model(features)
+        output = torch.sigmoid(outputs[0]) > 0.5
+        print(output)
+        # TODO: Test out prediction method
         # TODO: Integrate prediction with GUI
-        pass
 
 
 # ====== Calculating mean and std for dataset ===== #
