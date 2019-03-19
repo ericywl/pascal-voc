@@ -18,29 +18,6 @@ from sklearn.metrics import average_precision_score
 DEFAULT_DATASET_DIR = "./VOCdevkit/VOC2012/"
 SEED = 2019
 USE_CUDA = True
-NUM_CLASSES = 20
-CLASS_OCC_DICT = {
-    "aeroplane": 670,
-    "bicycle": 552,
-    "bird": 765,
-    "boat": 508,
-    "bottle": 706,
-    "bus": 421,
-    "car": 1161,
-    "cat": 1080,
-    "chair": 1119,
-    "cow": 303,
-    "diningtable": 538,
-    "dog": 1286,
-    "horse": 482,
-    "motorbike": 526,
-    "person": 4087,
-    "pottedplant": 527,
-    "sheep": 325,
-    "sofa": 507,
-    "train": 544,
-    "tvmonitor": 575
-}
 
 
 class ImageDataset(torch.utils.data.Dataset):
@@ -53,11 +30,12 @@ class ImageDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         label = self.labels[index]
+        fname = self.image_paths[index]
         img = PIL.Image.open(self.image_paths[index])
         if self.transform is not None:
             img = self.transform(img)
             label = torch.Tensor(label)
-        return img, label
+        return img, label, fname
 
     def __len__(self):
         return len(self.image_paths)
@@ -65,6 +43,29 @@ class ImageDataset(torch.utils.data.Dataset):
 
 class PascalClassifier:
     """Classifier for Pascal VOC"""
+    NUM_CLASSES = 20
+    CLASS_OCC_DICT = {
+        "aeroplane": 670,
+        "bicycle": 552,
+        "bird": 765,
+        "boat": 508,
+        "bottle": 706,
+        "bus": 421,
+        "car": 1161,
+        "cat": 1080,
+        "chair": 1119,
+        "cow": 303,
+        "diningtable": 538,
+        "dog": 1286,
+        "horse": 482,
+        "motorbike": 526,
+        "person": 4087,
+        "pottedplant": 527,
+        "sheep": 325,
+        "sofa": 507,
+        "train": 544,
+        "tvmonitor": 575
+    }
 
     def __init__(self, model=None, device=None, weights_path=None, scale=300,
                  crop_sz=280, rotation=30, five_crop=True, means=None, stds=None):
@@ -72,7 +73,7 @@ class PascalClassifier:
             # Initialize model
             model = models.resnet18(pretrained=True)
             model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-            model.fc = nn.Linear(512, NUM_CLASSES)
+            model.fc = nn.Linear(512, self.NUM_CLASSES)
         self.model = model
         self.device = device if device else torch.device("cpu")
         self.weights = torch.load(weights_path) if weights_path else None
@@ -121,7 +122,7 @@ class PascalClassifier:
         self.model.train(mode=True)
         train_loss = 0
         print("TRAIN:")
-        for batch_id, (features, labels) in enumerate(train_loader):
+        for batch_id, (features, labels, _) in enumerate(train_loader):
             features, labels = features.to(self.device), labels.to(self.device)
             optimizer.zero_grad()
             if self._five_crop:
@@ -150,14 +151,14 @@ class PascalClassifier:
 
     def val(self, val_loader, criterion, epoch, max_epochs):
         """Perform validation to choose the best weights from epochs"""
-        # AP = torch.zeros(NUM_CLASSES)
-        outputs_all = torch.zeros(0, NUM_CLASSES).to(self.device)
-        labels_all = torch.zeros(0, NUM_CLASSES).to(self.device)
+        outputs_all = torch.zeros(0, self.NUM_CLASSES).to(self.device)
+        labels_all = torch.zeros(0, self.NUM_CLASSES).to(self.device)
+        fnames_all = []
         ap_scikit = 0
-        self.model.train(mode=False)
         val_loss = 0
+        self.model.train(mode=False)
         print("VAL:")
-        for batch_id, (features, labels) in enumerate(val_loader):
+        for batch_id, (features, labels, fnames) in enumerate(val_loader):
             with torch.no_grad():
                 features = features.to(self.device)
                 labels = labels.to(self.device)
@@ -174,6 +175,7 @@ class PascalClassifier:
                 new_outputs = torch.sigmoid(outputs)
                 outputs_all = torch.cat((outputs_all, new_outputs))
                 labels_all = torch.cat((labels_all, labels))
+                fnames_all.extend(fnames)
                 if batch_id % 200 == 0 or batch_id == len(val_loader) - 1:
                     if batch_id == len(val_loader) - 1:
                         num = len(val_loader.dataset)
@@ -196,23 +198,32 @@ class PascalClassifier:
         acc = ((outputs_all > 0.5).float() *
                labels_all).sum() / labels_all.sum()
         print(f"Accuracy: {acc}")
-        # Print tail accuracy
         if epoch == max_epochs - 1:
             print("Tailacc:")
-            pprint(self.get_tailacc(outputs_all, labels_all))
+            # Get tail accuracy
+            tailacc = self.get_tailacc(outputs_all, labels_all)
+            pprint(tailacc)
+            # Save image filenames, outputs, labels and tailacc
+            if self._five_crop:
+                name = "five_crop"
+            else:
+                name = "rand_rotate"
+            np.save(f"saves/{name}_fnames.npy", np.asarray(fnames_all))
+            torch.save(outputs_all, f"saves/{name}_outputs.pth")
+            torch.save(labels_all, f"saves/{name}_labels.pth")
+            torch.save(tailacc, f"saves/{name}_tailacc.pth")
 
-    @staticmethod
-    def get_tailacc(outputs_all, labels_all):
+    def get_tailacc(self, outputs_all, labels_all):
         # Get tail accuracy
-        labels_all = outputs_all * labels_all
         tailacc = dict()
         tmax = outputs_all.max()
-        eps = (tmax - 0.5) / NUM_CLASSES
-        for t in range(NUM_CLASSES):
+        eps = (tmax - 0.5) / self.NUM_CLASSES
+        correct_all = outputs_all * labels_all
+        for t in range(self.NUM_CLASSES):
             threshold = 0.5 + eps * t
-            confidence = (outputs_all > threshold).float().sum(dim=0)
-            accuracy = (labels_all > threshold).float().sum(dim=0)
-            tailacc[threshold] = accuracy / confidence
+            denom = (outputs_all > threshold).float().sum(dim=0)
+            numer = (correct_all > threshold).float().sum(dim=0)
+            tailacc[threshold] = numer / denom
         return tailacc
 
     def run_trainval(self, batch_sz=8, max_epochs=30, learn_rate=0.01,
@@ -235,26 +246,31 @@ class PascalClassifier:
         optimizer = torch.optim.SGD(self.model.parameters(), lr=learn_rate)
         # Binary cross entropy with logits, weighted loss function
         if not loss_weights:
-            const = min((CLASS_OCC_DICT.values()))
+            const = min((self.CLASS_OCC_DICT.values()))
             loss_weights = torch.Tensor([
-                const * 1.0 / co for co in CLASS_OCC_DICT.values()
+                const * 1.0 / co for co in self.CLASS_OCC_DICT.values()
             ]).to(self.device)
         criterion = nn.BCEWithLogitsLoss(weight=loss_weights)
         # Training and validation
         for epoch in range(max_epochs):
             print(f"Epoch {epoch}")
             print("======================")
-            self.train(train_loader, criterion, optimizer)
+            #self.train(train_loader, criterion, optimizer)
             self.val(val_loader, criterion, epoch, max_epochs)
             print()
-        # Save best model weights
-        torch.save(self.weights, "pascal_weights.pth")
+        # Save best model weights and loss arrays
+        if self._five_crop:
+            name = "five_crop"
+        else:
+            name = "rand_rotate"
+        torch.save(self.weights, f"weights/{name}_weights.pth")
+        np.save(f"saves/{name}_train_loss.npy", self._train_loss_arr)
+        np.save(f"saves/{name}_val_loss.npy", self._val_loss_arr)
 
     def predict(self, image_path):
         """Predict the labels associated with image in image path"""
         if not self.weights:
-            print("Weights not found, can't do prediction.")
-            return
+            raise ValueError("Weights not found, can't do prediction.")
         self.model.load_state_dict(self.weights)
         self.model.eval()
         image = self._trf(PIL.Image.open(image_path))
@@ -271,10 +287,11 @@ class PascalClassifier:
         print(output)
         # TODO: Test out prediction method
         # TODO: Integrate prediction with GUI
-
+        return output
 
 # ====== Calculating mean and std for dataset ===== #
 # Not used in runtime
+
 
 def get_means_stds(dataset):
     """Get mean and standard deviation, given dataset"""
@@ -324,16 +341,23 @@ def random_seeding(seed_value):
         torch.cuda.manual_seed_all(seed_value)
 
 
+def test_predict():
+    pc = PascalClassifier(weights_path="weights/five_crop_weights.pth")
+    pc.predict("sofa-cat.jpg")
+
+
 def main():
     """Main function"""
     # Seeding if it's available
     random_seeding(SEED)
-    # Initialize CUDA device 
+    # Initialize CUDA device
     device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
     # Run training and validation
-    pc = PascalClassifier(device=device)
-    pc.run_trainval(max_epochs=30)
+    pc = PascalClassifier(
+        device=device, weights_path="weights/five_crop_weights.pth")
+    pc.run_trainval(max_epochs=1)
 
 
 if __name__ == "__main__":
     main()
+    # test_predict()
