@@ -7,10 +7,12 @@ Install 2 things before running the code.
 - PyTorch for all things deep-learning
 - PyTorch TorchNet for the average precision measure, avoid reinventing the
     wheel
+- Flask for the web GUI
 
 ```
 pip install torch
 pip install git+https://github.com/pytorch/tnt.git@master
+pip install flask
 ```
 
 ## Instructions
