@@ -380,8 +380,35 @@ def main():
         device=device, weights_path="weights/five_crop_weights.pth")
     pc.run_trainval(max_epochs=1)
 
-
+def plot(name):
+    tail_acc=torch.load(f"saves/{name}_tailacc.pth",map_location=torch.device('cpu'))
+    train_loss=np.load(f"saves/{name}_train_loss.npy")
+    val_loss=np.load(f"saves/{name}_val_loss.npy")
+    
+    x=np.arange(len(val_loss))
+    plt.plot(x,val_loss)
+    plt.xlabel("epoch")
+    plt.title(f"{name}_validation_loss")
+    plt.savefig(f"saves/{name}_val_loss.jpg")
+    plt.close()
+    plt.plot(x,train_loss)
+    plt.xlabel("epoch")
+    plt.title(f"{name}_training_loss")
+    plt.savefig(f"saves/{name}_train_loss.jpg")
+    plt.close()
+    x=list()
+    y=list()
+    for (key,values) in tail_acc.items():
+        x.append(key.item())
+        y.append(values.sum().item()/20)
+    plt.plot(x,y)
+    plt.title(f"{name}_average_tail_accuracy")
+    plt.xlabel("threshold")
+    plt.savefig(f"saves/{name}_tail_acc.jpg")
+    plt.close()
+    
 if __name__ == "__main__":
     main()
     # test_predict()
     # top_confidence_list()
+    # plot("five_crop")
