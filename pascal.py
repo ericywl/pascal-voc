@@ -1,5 +1,6 @@
 import numpy as np
 import PIL
+import random
 import matplotlib.pyplot as plt
 from pprint import pprint
 
@@ -14,10 +15,10 @@ from vocparse import PascalVOC
 from sklearn.metrics import average_precision_score
 
 
-DATASET_DIR = "./VOCdevkit/VOC2012/"
-NUM_CLASSES = 20
-FIVE_CROP = True
+DEFAULT_DATASET_DIR = "./VOCdevkit/VOC2012/"
 SEED = 2019
+USE_CUDA = True
+NUM_CLASSES = 20
 CLASS_OCC_DICT = {
     "aeroplane": 670,
     "bicycle": 552,
@@ -63,15 +64,51 @@ class ImageDataset(torch.utils.data.Dataset):
 
 
 class PascalClassifier:
-    def __init__(self, model, device=None, pretrained_weights=None):
+
+    def __init__(self, model, device=None,  weights_path=None, scale=300,
+                 crop_sz=280, rotation=30, five_crop=True, means=None, stds=None):
         self.model = model
         self.device = device if device else torch.device("cpu")
-        self.weights = pretrained_weights
+        self.weights = torch.load(weights_path) if weights_path else None
         self.model.to(device)
-        # Hidden variables
+        # Calculated means and stds from Pascal VOC
+        self.means = means if means else [0.4603, 0.4384, 0.4051]
+        self.stds = stds if stds else [0.1576, 0.1561, 0.1611]
+        # Image parameters
+        self._image_params = [scale, crop_sz, rotation]
+        self._five_crop = five_crop
+        if self._five_crop:
+            self._trf = transforms.Compose([
+                transforms.Resize(scale),
+                transforms.FiveCrop(crop_sz),
+                transforms.Lambda(lambda crops: torch.stack(
+                    [transforms.Normalize(self.means, self.stds)(
+                        transforms.ToTensor()(crop)) for crop in crops])
+                )
+            ])
+        else:
+            self._trf = transforms.Compose([
+                transforms.RandomRotation(30),
+                transforms.RandomResizedCrop(crop_sz),
+                transforms.ToTensor(),
+                transforms.Normalize(means, stds)
+            ])
+        # Misc variables
         self._best_loss = -1.0
         self._val_loss_arr = []
         self._train_loss_arr = []
+
+    @property
+    def scale(self):
+        return self._image_params[0]
+
+    @property
+    def crop_sz(self):
+        return self._image_params[1]
+
+    @property
+    def rotation(self):
+        return self._image_params[2]
 
     def train(self, train_loader, criterion, optimizer):
         """Train the model"""
@@ -81,7 +118,7 @@ class PascalClassifier:
         for batch_id, (features, labels) in enumerate(train_loader):
             features, labels = features.to(self.device), labels.to(self.device)
             optimizer.zero_grad()
-            if FIVE_CROP:
+            if self._five_crop:
                 bsize, ncrops, chan, height, width = features.size()
                 outputs = self.model(features.view(-1, chan, height, width))
                 outputs = outputs.view(bsize, ncrops, -1).mean(1)
@@ -118,7 +155,7 @@ class PascalClassifier:
             with torch.no_grad():
                 features = features.to(self.device)
                 labels = labels.to(self.device)
-                if FIVE_CROP:
+                if self._five_crop:
                     bsize, ncrops, chan, height, width = features.size()
                     outputs = self.model(
                         features.view(-1, chan, height, width))
@@ -171,28 +208,18 @@ class PascalClassifier:
             tailacc[threshold] = accuracy / confidence
         return tailacc
 
-    def run_trainval(self, optimizer, criterion, scale=300, crop_sz=280,
-                     batch_sz=8, max_epochs=30):
+    def run_trainval(self, optimizer, criterion, batch_sz=8, max_epochs=30,
+                     dataset_dir=DEFAULT_DATASET_DIR):
         """Run both training and validation for some epochs"""
-        # Calculated means and stds from Pascal VOC
-        means = [0.4603, 0.4384, 0.4051]
-        stds = [0.1576, 0.1561, 0.1611]
         # Getting train, val filenames and multi-hot labels
-        pv = PascalVOC(DATASET_DIR)
+        pv = PascalVOC(dataset_dir)
         train_filenames, train_labels = pv.imgs_to_fnames_labels("train")
         val_filenames, val_labels = pv.imgs_to_fnames_labels("val")
         # Loading dataset
-        trf = transforms.Compose([
-            transforms.Resize(scale),
-            transforms.FiveCrop(crop_sz),
-            transforms.Lambda(lambda crops: torch.stack(
-                [transforms.Normalize(means, stds)(
-                    transforms.ToTensor()(crop)) for crop in crops])
-            )
-        ])
         train_dataset = ImageDataset(train_filenames, train_labels,
-                                     transform=trf)
-        val_dataset = ImageDataset(val_filenames, val_labels, transform=trf)
+                                     transform=self._trf)
+        val_dataset = ImageDataset(val_filenames, val_labels,
+                                   transform=self._trf)
         train_loader = tdata.DataLoader(train_dataset, batch_size=batch_sz,
                                         shuffle=True)
         val_loader = tdata.DataLoader(val_dataset, batch_size=batch_sz,
@@ -204,6 +231,8 @@ class PascalClassifier:
             self.train(train_loader, criterion, optimizer)
             self.val(val_loader, criterion, epoch, max_epochs)
             print()
+        # Save best model weights
+        torch.save(self.weights, "pascal_weights.pth")
 
     def predict(self):
         # TODO: Integrate prediction with GUI
@@ -236,7 +265,7 @@ def get_means_stds(dataset):
 
 def pascal_means_stds(scale, crop_sz):
     """Calculate mean and standard deviation for Pascal VOC"""
-    pv = PascalVOC(DATASET_DIR)
+    pv = PascalVOC(DEFAULT_DATASET_DIR)
     fnames, labels = pv.imgs_to_fnames_labels("trainval")
     trf = transforms.Compose([
         transforms.Resize(scale),
@@ -252,17 +281,25 @@ def pascal_means_stds(scale, crop_sz):
 # ================================================= #
 
 
+def random_seeding(seed_value):
+    """Seed all random functions for reproducibility"""
+    if seed_value > 0:
+        random.seed(seed_value)
+        np.random.seed(seed_value)
+        torch.manual_seed(seed_value)
+        torch.cuda.manual_seed_all(seed_value)
+
+
 def main():
+    """Main function"""
     # Seeding if it's available
-    if SEED > 0:
-        np.random.seed(SEED)
-        torch.manual_seed(SEED)
+    random_seeding(SEED)
     # Initialize model
     model = models.resnet18(pretrained=True)
     model.avgpool = nn.AdaptiveAvgPool2d((1, 1))
     model.fc = nn.Linear(512, NUM_CLASSES)
     # Initialize CUDA device
-    device = torch.device("cuda")
+    device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
     # Stochastic gradient descent optimizer
     learn_rate = 0.01
     optimizer = torch.optim.SGD(model.parameters(), lr=learn_rate)
