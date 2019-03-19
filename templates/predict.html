@@ -1,5 +1,16 @@
-{% extends "layout.html" %} {% set active_page = "predict"%} {% block content
-%}
+{% extends "layout.html" %}
+{% set active_page = "predict"%}
+
+{% block jumbo_title %}
+Predict Image
+{% endblock %}
+
+{% block jumbo_subtitle %}
+Upload an image to obtain it's label predictions and
+ corresponding confidence scores
+{% endblock %}
+
+{% block content %}
 <div class="row">
     <form class="md-form col-8">
         <div class="file-field">
@@ -56,6 +67,10 @@
     </div>
 </div>
 
-{% endblock %} {% block scripts %} <script type=text/javascript src="{{
+{% endblock %}
+
+{% block scripts %}
+<script type=text/javascript src="{{
   url_for('static', filename='js/predict.js')
-}}"></script>{% endblock %}
+}}"></script>
+{% endblock %}

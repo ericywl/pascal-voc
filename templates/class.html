@@ -1,0 +1,17 @@
+{% extends "layout.html" %}
+{% set active_page = "ranks" %}
+
+
+{% block content %}
+{% endblock %} 
+
+{% block scripts %}
+<script type=text/javascript src="{{
+  url_for('static', filename='js/class.js')
+}}"></script>
+
+<link
+    rel="stylesheet"
+    href="/static/css/class.css"
+/>
+{% endblock %}

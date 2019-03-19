@@ -27,6 +27,7 @@
             integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
             crossorigin="anonymous"
         ></script>
+        {% block scripts %} {% endblock %}
     </head>
 
     <body>
@@ -65,15 +66,13 @@
             </nav>
 
             <div class="jumbotron">
-                <h1 class="display-4">Pascal VOC App</h1>
+                <h1 class="display-4">{% block jumbo_title %}{% endblock %}</h1>
                 <p class="lead">
-                    Application for image prediction and viewing pre-computed
-                    validation set predictions
+                    {% block jumbo_subtitle %}{% endblock %}
                 </p>
             </div>
 
-            <div id="content">{% block content %}{% endblock %}</div>
+            <div id="content" class="container">{% block content %}{% endblock %}</div>
         </div>
     </body>
-    {% block scripts %} {% endblock %}
 </html>
