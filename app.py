@@ -8,6 +8,7 @@ from pascal import PascalClassifier
 
 app = Flask(__name__)
 pc = PascalClassifier(weights_path="weights/five_crop_weights.pth")
+classes = list(pc.CLASS_OCC_DICT.keys())
 
 
 @app.route("/")
@@ -20,14 +21,18 @@ def predict():
     if request.method == "GET":
         return render_template("predict.html")
     if request.method == "POST":
-        # TODO: add image to local and do prediction
+        # Request data is not in JSON format
         if not request.content_type == "application/json":
             return "", "400 REQUEST DATA NOT JSON"
         img_data = re.sub("^data:image/.+;base64,", "",
                           request.get_json()["data"])
         img_blob = base64.b64decode(img_data)
-        print(pc.predict(io.BytesIO(img_blob)))
-        return jsonify({"test": "hello"})
+        output = pc.predict(io.BytesIO(img_blob))
+        pred = output > 0.5
+        indices = sorted(range(len(output)), reverse=True,
+                         key=lambda i: output[i].item())[:pred.sum().item()]
+        pred_confidence = {classes[i]: output[i].item() for i in indices}
+        return jsonify(pred_confidence)
     # Invalid HTTP request method
     return "", "400 INVALID REQUEST METHOD"
 
