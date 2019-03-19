@@ -23,7 +23,7 @@ window.onload = function() {
         reader.onload = function(e) {
             const imgBlob = e.target.result;
             const json = { name: file.name, data: imgBlob };
-            makePostRequest("/predict")
+            makePostRequest("/predict", json)
                 .then(function(response) {
                     console.log(response);
                 })
@@ -53,6 +53,7 @@ const makePostRequest = function(url, json) {
         };
 
         xhr.open("POST", url, true);
-        xhr.send(json);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify(json));
     });
 };

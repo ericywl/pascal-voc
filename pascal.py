@@ -267,13 +267,13 @@ class PascalClassifier:
         np.save(f"saves/{name}_train_loss.npy", self._train_loss_arr)
         np.save(f"saves/{name}_val_loss.npy", self._val_loss_arr)
 
-    def predict(self, image_path):
+    def predict(self, image):
         """Predict the labels associated with image in image path"""
         if not self.weights:
             raise ValueError("Weights not found, can't do prediction.")
         self.model.load_state_dict(self.weights)
         self.model.eval()
-        image = self._trf(PIL.Image.open(image_path))
+        image = self._trf(PIL.Image.open(image))
         features = image[None].to(self.device)
         # Perform  prediction
         if self._five_crop:
@@ -283,8 +283,7 @@ class PascalClassifier:
             outputs = outputs.view(bsize, ncrops, -1).mean(1)
         else:
             outputs = self.model(features)
-        output = torch.sigmoid(outputs[0]) > 0.5
-        print(output)
+        output = torch.sigmoid(outputs[0])
         # TODO: Test out prediction method
         # TODO: Integrate prediction with GUI
         return output
