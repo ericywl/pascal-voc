@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.utils.data as tdata
 import torchvision.models as models
 import torchvision.transforms as transforms
-import torchnet.meter as meter
 
 from vocparse import PascalVOC
 from sklearn.metrics import average_precision_score
@@ -343,6 +342,31 @@ def random_seeding(seed_value):
 def test_predict():
     pc = PascalClassifier(weights_path="weights/five_crop_weights.pth")
     pc.predict("sofa-cat.jpg")
+    
+def top_confidence_list():
+    """Rank the top predictions for each class and output as json"""
+    f_names=np.load('saves/five_crop_fnames.npy')
+    outputs_all=torch.load("saves/five_crop_outputs.pth",map_location=torch.device('cpu'))
+    labels_all=torch.load("saves/five_crop_labels.pth",map_location=torch.device('cpu'))
+    n,k=outputs_all.shape
+    out_reshape=outputs_all.permute(1,0)
+    lab_reshape=labels_all.permute(1,0)
+    pv = PascalVOC(DEFAULT_DATASET_DIR)
+    json_output=dict()
+    
+    for i in range(k):
+        ap_scikit = average_precision_score(
+            lab_reshape[i].cpu(), out_reshape[i].cpu())
+        predictions = (out_reshape[i]>0.5).float()*out_reshape[i]
+        prediction_number = (out_reshape[i]>0.5).sum()
+        precision,location = torch.sort(predictions,dim=0,descending=True)
+        urls=[f_names[j] for j in location]
+        corrects= [lab_reshape[i][j] for j in location]
+        json_output[i]={"class_name":pv.list_image_sets()[i],"AP":ap_scikit}
+        json_output[i]["images"]=[{"images_url":urls[j],"confidence":precision[j].item(),"correct":corrects[j].item()}for j in range(prediction_number)]
+    
+    with open('saves/ranks.json', 'w') as outfile:
+        json.dump(json_output, outfile, sort_keys = False, indent = 4,ensure_ascii = False)   
 
 
 def main():
@@ -360,3 +384,4 @@ def main():
 if __name__ == "__main__":
     main()
     # test_predict()
+    # top_confidence_list()
