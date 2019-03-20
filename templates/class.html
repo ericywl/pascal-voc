@@ -1,8 +1,75 @@
 {% extends "layout.html" %}
 {% set active_page = "ranks" %}
 
+{% block jumbo_title %}
+{{ class_name[0] | upper }}{{ class_name[1:] }}
+{% endblock %}
+
+{% block jumbo_subtitle %}
+View the validation set top-ranked predictions for "{{ class_name }}"
+{% endblock %}
 
 {% block content %}
+<div>
+    <table id="class-table" class="table">
+        <thead>
+            <tr>
+                <th
+                    id="table-id"
+                    scope="col"
+                    style="width: 20%"
+                    class="clickable-header"
+                >
+                    ID <span></span>
+                </th>
+                <th
+                    scope="col"
+                    style="width: 30%"
+                >
+                    Image
+                </th>
+                <th
+                    id="table-conf"
+                    scope="col"
+                    style="width: 30%"
+                    class="clickable-header"
+                >
+                    Confidence <span>&#9660;</span>
+                </th>
+                <th
+                    id="table-correct"
+                    scope="col"
+                    style="width: 20%"
+                    class="clickable-header"
+                >
+                    Correctly Predicted <span></span>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for el in data["images"] %}
+            <tr class="clickable-row">
+                <th class="row-starter" scope="row">
+                    {{ el["images_url"][31:-4] }}
+                </th>
+                <td>
+                    <img
+                        src="/static/images/{{ el['images_url'][31:] }}"
+                        height="100"
+                        width="auto"
+                    >
+                </td>
+                <td>{{ el["confidence"] | round(4, "floor") }}</td>
+                {% if el["correct"] == 1.0 %}
+                <td>True</td>
+                {% else %}
+                <td>False</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %} 
 
 {% block scripts %}
@@ -12,6 +79,6 @@
 
 <link
     rel="stylesheet"
-    href="/static/css/class.css"
+    href="/static/css/table.css"
 />
 {% endblock %}

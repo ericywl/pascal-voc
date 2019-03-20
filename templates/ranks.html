@@ -46,7 +46,7 @@ View the pre-computed ranked predictions for each class in the Pascal VOC
             <tr class="clickable-row">
                 <th class="row-starter" scope="row">{{ k }}</th>
                 <td>{{ v["class_name"] }}</td>
-                <td>{{ v["AP"] }}</td>
+                <td>{{ v["AP"] | round(4, "floor") }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -61,6 +61,6 @@ View the pre-computed ranked predictions for each class in the Pascal VOC
 
 <link
     rel="stylesheet"
-    href="/static/css/ranks.css"
+    href="/static/css/table.css"
 />
 {% endblock %}

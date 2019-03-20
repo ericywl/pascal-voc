@@ -1,8 +1,8 @@
 window.onload = function() {
-    const columns = ["table-id", "table-class", "table-avg-precision"];
+    const columns = ["table-id", "table-conf", "table-correct"];
     const thead = document.getElementsByTagName("thead")[0];
     thead.onclick = function(e) {
-        targ = e.target
+        targ = e.target;
         if (e.target.tagName.toLowerCase() === "span") {
             targ = e.target.parentElement;
         }
@@ -10,18 +10,11 @@ window.onload = function() {
         if (index < 0 || index > 2) return;
         const asc = sortTable(targ);
         for (let el of thead.getElementsByTagName("th")) {
-            el.getElementsByTagName("span")[0].innerHTML = "";
+            if (el.id) el.getElementsByTagName("span")[0].innerHTML = "";
         }
-        targ.getElementsByTagName("span")[0].innerHTML =
-            asc ? "&#9650;" : "&#9660;";
-    };
-
-    const tbody = document.getElementsByTagName("tbody")[0];
-    tbody.onclick = function(e) {
-        tds = e.target.parentElement.getElementsByTagName("td");
-        if (tds.length < 1 || tds.length > 2) return;
-        className = tds[0].innerText;
-        window.location = "/ranks/" + className;
+        targ.getElementsByTagName("span")[0].innerHTML = asc
+            ? "&#9650;"
+            : "&#9660;";
     };
 };
 
