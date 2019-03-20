@@ -124,6 +124,23 @@ class PascalClassifier:
     def rotation(self):
         return self._image_params[2]
 
+    @staticmethod
+    def _batch_progress(batch_id, loader, feats_len, loss, frequency):
+        """Print progress of batches"""
+        if batch_id % 200 == 0 or batch_id == len(loader) - 1:
+            if batch_id == len(loader) - 1:
+                num = len(loader.dataset)
+            else:
+                num = batch_id * feats_len
+            if loss:
+                print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
+                    num, len(loader.dataset),
+                    100. * batch_id / len(loader), loss.item()))
+            else:
+                print("[{}/{} ({:.0f}%)]".format(
+                    num, len(loader.dataset),
+                    100. * batch_id / len(loader)))
+
     def train(self, train_loader, criterion, optimizer):
         """Train the model"""
         self.model.train(mode=True)
@@ -144,28 +161,20 @@ class PascalClassifier:
             # Compute gradient and do SGD step
             loss.backward()
             optimizer.step()
-            if batch_id % 200 == 0 or batch_id == len(train_loader) - 1:
-                if batch_id == len(train_loader) - 1:
-                    num = len(train_loader.dataset)
-                else:
-                    num = batch_id * len(features)
-                print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
-                    num, len(train_loader.dataset),
-                    100. * batch_id / len(train_loader), loss.item()))
+            self._batch_progress(batch_id, train_loader,
+                                 len(features), loss, 200)
         train_loss /= len(train_loader)
         print(f"Average training loss: {train_loss}")
         self._train_loss_arr.append(train_loss)
 
-    def val(self, val_loader, criterion, epoch, max_epochs):
+    def val(self, val_loader, criterion):
         """Perform validation to choose the best weights from epochs"""
         outputs_all = torch.zeros(0, self.NUM_CLASSES).to(self.device)
         labels_all = torch.zeros(0, self.NUM_CLASSES).to(self.device)
-        fnames_all = []
-        ap_scikit = 0
         val_loss = 0
         self.model.train(mode=False)
         print("VAL:")
-        for batch_id, (features, labels, fnames) in enumerate(val_loader):
+        for batch_id, (features, labels, _) in enumerate(val_loader):
             with torch.no_grad():
                 features = features.to(self.device)
                 labels = labels.to(self.device)
@@ -182,15 +191,8 @@ class PascalClassifier:
                 new_outputs = torch.sigmoid(outputs)
                 outputs_all = torch.cat((outputs_all, new_outputs))
                 labels_all = torch.cat((labels_all, labels))
-                fnames_all.extend(fnames)
-                if batch_id % 200 == 0 or batch_id == len(val_loader) - 1:
-                    if batch_id == len(val_loader) - 1:
-                        num = len(val_loader.dataset)
-                    else:
-                        num = batch_id * len(features)
-                    print("[{}/{} ({:.0f}%)] Loss: {:.6f}".format(
-                        num, len(val_loader.dataset),
-                        100. * batch_id / len(val_loader), loss.item()))
+                self._batch_progress(batch_id, val_loader,
+                                     len(features), loss, 200)
         val_loss /= len(val_loader)
         print(f"Average validation loss: {val_loss}")
         self._val_loss_arr.append(val_loss)
@@ -205,20 +207,53 @@ class PascalClassifier:
         acc = ((outputs_all > 0.5).float() *
                labels_all).sum() / labels_all.sum()
         print(f"Accuracy: {acc}")
-        if epoch == max_epochs - 1:
-            print("Tailacc:")
-            # Get tail accuracy
-            tailacc = self.get_tailacc(outputs_all, labels_all)
-            pprint(tailacc)
-            # Save image filenames, outputs, labels and tailacc
-            if self._five_crop:
-                name = "five_crop"
-            else:
-                name = "rand_rotate"
-            np.save(f"saves/{name}_fnames.npy", np.asarray(fnames_all))
-            torch.save(outputs_all, f"saves/{name}_outputs.pth")
-            torch.save(labels_all, f"saves/{name}_labels.pth")
-            torch.save(tailacc, f"saves/{name}_tailacc.pth")
+
+    def measure_finalperf(self, val_loader):
+        """
+        Perform prediction on validation set using best weights
+        and get tail accuracy, average precision etc.
+        """
+        print("Measuring performance using best weights...")
+        self.model.load_state_dict(self.weights)
+        outputs_all = torch.zeros(0, self.NUM_CLASSES).to(self.device)
+        labels_all = torch.zeros(0, self.NUM_CLASSES).to(self.device)
+        fnames_all = []
+        for batch_id, (features, labels, fnames) in enumerate(val_loader):
+            with torch.no_grad():
+                features = features.to(self.device)
+                labels = labels.to(self.device)
+                if self._five_crop:
+                    bsize, ncrops, chan, height, width = features.size()
+                    outputs = self.model(
+                        features.view(-1, chan, height, width))
+                    outputs = outputs.view(bsize, ncrops, -1).mean(1)
+                else:
+                    outputs = self.model(features)
+                new_outputs = torch.sigmoid(outputs)
+                outputs_all = torch.cat((outputs_all, new_outputs))
+                labels_all = torch.cat((labels_all, labels))
+                fnames_all.extend(fnames)
+                self._batch_progress(batch_id, val_loader,
+                                     len(features), None, 200)
+        print("Tailacc:")
+        # Get tail accuracy
+        tailacc = self.get_tailacc(outputs_all, labels_all)
+        pprint(tailacc)
+        # Save image filenames, outputs, labels and tailacc
+        if self._five_crop:
+            name = "five_crop"
+        else:
+            name = "rand_rotate"
+        ap_scikit = average_precision_score(
+            labels_all.cpu(), outputs_all.cpu())
+        print(f"Best AP: {ap_scikit}")
+        acc = ((outputs_all > 0.5).float() *
+               labels_all).sum() / labels_all.sum()
+        print(f"Best Accuracy: {acc}")
+        np.save(f"saves/{name}_fnames.npy", np.asarray(fnames_all))
+        torch.save(outputs_all, f"saves/{name}_outputs.pth")
+        torch.save(labels_all, f"saves/{name}_labels.pth")
+        torch.save(tailacc, f"saves/{name}_tailacc.pth")
 
     def get_tailacc(self, outputs_all, labels_all):
         # Get tail accuracy
@@ -233,7 +268,7 @@ class PascalClassifier:
             tailacc[threshold] = numer / denom
         return tailacc
 
-    def run_trainval(self, batch_sz=8, max_epochs=30, learn_rate=0.01,
+    def run_trainval(self, batch_sz=8, max_epochs=30, learn_rate=0.1,
                      loss_weights=None, dataset_dir=DEFAULT_DATASET_DIR):
         """Run both training and validation for some epochs"""
         # Getting train, val filenames and multi-hot labels
@@ -251,6 +286,8 @@ class PascalClassifier:
                                       shuffle=True)
         # Stochastic gradient descent optimizer
         optimizer = torch.optim.SGD(self.model.parameters(), lr=learn_rate)
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=10, gamma=0.1)
         # Binary cross entropy with logits, weighted loss function
         if not loss_weights:
             const = min((self.CLASS_OCC_DICT.values()))
@@ -262,9 +299,12 @@ class PascalClassifier:
         for epoch in range(max_epochs):
             print(f"Epoch {epoch}")
             print("======================")
+            scheduler.step()
             self.train(train_loader, criterion, optimizer)
-            self.val(val_loader, criterion, epoch, max_epochs)
+            self.val(val_loader, criterion)
             print()
+        # Test best weights on validation set
+        self.measure_finalperf(val_loader)
         # Save best model weights and loss arrays
         if self._five_crop:
             name = "five_crop"
@@ -437,8 +477,8 @@ def main():
     # Initialize CUDA device
     device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
     # Run training and validation
-    pc = PascalClassifier(device=device)
-    pc.run_trainval(max_epochs=30)
+    pc = PascalClassifier(device=device, five_crop=True)
+    pc.run_trainval(max_epochs=1)
 
 
 if __name__ == "__main__":
