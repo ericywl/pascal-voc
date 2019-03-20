@@ -1,7 +1,6 @@
 import PIL
 import random
 import json
-import matplotlib.pyplot as plt
 from pprint import pprint
 import numpy as np
 
@@ -208,7 +207,7 @@ class PascalClassifier:
             labels_all.cpu(), outputs_all.cpu(), average="weighted")
         print(f"AP: {ap_scikit}")
         num_correct = ((outputs_all > 0.5).float() == labels_all).sum().item()
-        acc =  num_correct / float(labels_all.size(0) * labels_all.size(1))
+        acc = num_correct / float(labels_all.size(0) * labels_all.size(1))
         print(f"Accuracy: {acc}")
         self._ap_arr.append(ap_scikit)
         self._accuracy_arr.append(acc)
@@ -248,7 +247,7 @@ class PascalClassifier:
             labels_all.cpu(), outputs_all.cpu(), average="weighted")
         print(f"Best AP: {ap_scikit}")
         num_correct = ((outputs_all > 0.5).float() == labels_all).sum().item()
-        acc =  num_correct / float(labels_all.size(0) * labels_all.size(1))
+        acc = num_correct / float(labels_all.size(0) * labels_all.size(1))
         print(f"Best Accuracy: {acc}")
         # Save image filenames, outputs, labels and tailacc
         if self._five_crop:
@@ -279,7 +278,6 @@ class PascalClassifier:
             # Tail accuracy
             torch.save(tailacc, f"saves/{name}_tailacc.pth")
             print(f"Tail accuracy saved to saves/{name}_tailacc.pth")
-
 
     def get_tailacc(self, outputs_all, labels_all):
         # Get tail accuracy
@@ -331,7 +329,6 @@ class PascalClassifier:
             print()
         # Test best weights on validation set
         self.measure_finalperf(val_loader)
-
 
     def predict(self, image):
         """Predict the labels associated with image in image path"""
@@ -448,40 +445,6 @@ def top_confidence_list():
 
 # ==================================================== #
 
-# ====== Plot all loss and accuracy graphs for report ===== #
-# Not used in runtime
-
-
-def plot(name):
-    tail_acc = torch.load(
-        f"saves/{name}_tailacc.pth", map_location=torch.device('cpu'))
-    train_loss = np.load(f"saves/{name}_train_loss.npy")
-    val_loss = np.load(f"saves/{name}_val_loss.npy")
-
-    x = np.arange(len(val_loss))
-    plt.plot(x, val_loss)
-    plt.xlabel("epoch")
-    plt.title(f"{name}_validation_loss")
-    plt.savefig(f"saves/{name}_val_loss.jpg")
-    plt.close()
-    plt.plot(x, train_loss)
-    plt.xlabel("epoch")
-    plt.title(f"{name}_training_loss")
-    plt.savefig(f"saves/{name}_train_loss.jpg")
-    plt.close()
-    x = list()
-    y = list()
-    for (key, values) in tail_acc.items():
-        x.append(key.item())
-        y.append(values.sum().item() / 20)
-    plt.plot(x, y)
-    plt.title(f"{name}_average_tail_accuracy")
-    plt.xlabel("threshold")
-    plt.savefig(f"saves/{name}_tail_acc.jpg")
-    plt.close()
-
-# ========================================================= #
-
 
 def random_seeding(seed_value):
     """Seed all random functions for reproducibility"""
@@ -499,12 +462,11 @@ def main():
     # Initialize CUDA device
     device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
     # Run training and validation
-    pc = PascalClassifier(device=device, five_crop=False)
+    pc = PascalClassifier(device=device, five_crop=True)
     pc.run_trainval(max_epochs=40)
 
 
 if __name__ == "__main__":
     main()
     # top_confidence_list()
-    # plot("five_crop")
     # pascal_means_stds(True, 300, 280, 30)
