@@ -4,3 +4,6 @@ VOCdevkit/
 # Python files
 __pycache__/
 .python-version
+
+# Images
+static/images/
