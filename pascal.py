@@ -18,6 +18,7 @@ from vocparse import PascalVOC
 DEFAULT_DATASET_DIR = "./VOCdevkit/VOC2012/"
 SEED = 2019
 USE_CUDA = True
+SAVE_OUTPUTS = True
 
 
 class ImageDataset(torch.utils.data.Dataset):
@@ -111,6 +112,8 @@ class PascalClassifier:
         self._best_loss = -1.0
         self._val_loss_arr = []
         self._train_loss_arr = []
+        self._ap_arr = []
+        self._accuracy_arr = []
 
     @property
     def scale(self):
@@ -127,7 +130,7 @@ class PascalClassifier:
     @staticmethod
     def _batch_progress(batch_id, loader, feats_len, loss, frequency):
         """Print progress of batches"""
-        if batch_id % 200 == 0 or batch_id == len(loader) - 1:
+        if batch_id % frequency == 0 or batch_id == len(loader) - 1:
             if batch_id == len(loader) - 1:
                 num = len(loader.dataset)
             else:
@@ -202,11 +205,13 @@ class PascalClassifier:
             self.weights = self.model.state_dict()
         # Print AP and accuracy
         ap_scikit = average_precision_score(
-            labels_all.cpu(), outputs_all.cpu())
+            labels_all.cpu(), outputs_all.cpu(), average="weighted")
         print(f"AP: {ap_scikit}")
-        acc = ((outputs_all > 0.5).float() *
-               labels_all).sum() / labels_all.sum()
+        num_correct = ((outputs_all > 0.5).float() == labels_all).sum().item()
+        acc =  num_correct / float(labels_all.size(0) * labels_all.size(1))
         print(f"Accuracy: {acc}")
+        self._ap_arr.append(ap_scikit)
+        self._accuracy_arr.append(acc)
 
     def measure_finalperf(self, val_loader):
         """
@@ -239,21 +244,42 @@ class PascalClassifier:
         # Get tail accuracy
         tailacc = self.get_tailacc(outputs_all, labels_all)
         pprint(tailacc)
+        ap_scikit = average_precision_score(
+            labels_all.cpu(), outputs_all.cpu(), average="weighted")
+        print(f"Best AP: {ap_scikit}")
+        num_correct = ((outputs_all > 0.5).float() == labels_all).sum().item()
+        acc =  num_correct / float(labels_all.size(0) * labels_all.size(1))
+        print(f"Best Accuracy: {acc}")
         # Save image filenames, outputs, labels and tailacc
         if self._five_crop:
             name = "five_crop"
         else:
             name = "rand_rotate"
-        ap_scikit = average_precision_score(
-            labels_all.cpu(), outputs_all.cpu())
-        print(f"Best AP: {ap_scikit}")
-        acc = ((outputs_all > 0.5).float() *
-               labels_all).sum() / labels_all.sum()
-        print(f"Best Accuracy: {acc}")
-        np.save(f"saves/{name}_fnames.npy", np.asarray(fnames_all))
-        torch.save(outputs_all, f"saves/{name}_outputs.pth")
-        torch.save(labels_all, f"saves/{name}_labels.pth")
-        torch.save(tailacc, f"saves/{name}_tailacc.pth")
+        if SAVE_OUTPUTS:
+            # Best weights
+            torch.save(self.weights, f"weights/{name}_weights.pth")
+            print(f"Best weights saved to weights/{name}_weights.pth")
+            # Train and val loss
+            np.save(f"saves/{name}_train_loss.npy", self._train_loss_arr)
+            print(f"Training loss array saved to saves/{name}_train_loss.npy")
+            np.save(f"saves/{name}_val_loss.npy", self._val_loss_arr)
+            print(f"Validation loss array saved to saves/{name}_val_loss.npy")
+            # Filenames, outputs and labels
+            np.save(f"saves/{name}_fnames.npy", np.asarray(fnames_all))
+            print(f"Filenames saved to saves/{name}_fnames.npy")
+            torch.save(outputs_all, f"saves/{name}_outputs.pth")
+            print(f"Model outputs saved to saves/{name}_outputs.pth")
+            torch.save(labels_all, f"saves/{name}_labels.pth")
+            print(f"Labels saved to saves/{name}_labels.pth")
+            # Accuracy and average precision
+            np.save(f"saves/{name}_acc.npy", self._accuracy_arr)
+            print(f"Accuracy saved to saves/{name}_acc.npy")
+            np.save(f"saves/{name}_ap.npy", self._ap_arr)
+            print(f"Average precision saved to saves/{name}_ap.npy")
+            # Tail accuracy
+            torch.save(tailacc, f"saves/{name}_tailacc.pth")
+            print(f"Tail accuracy saved to saves/{name}_tailacc.pth")
+
 
     def get_tailacc(self, outputs_all, labels_all):
         # Get tail accuracy
@@ -305,14 +331,7 @@ class PascalClassifier:
             print()
         # Test best weights on validation set
         self.measure_finalperf(val_loader)
-        # Save best model weights and loss arrays
-        if self._five_crop:
-            name = "five_crop"
-        else:
-            name = "rand_rotate"
-        torch.save(self.weights, f"weights/{name}_weights.pth")
-        np.save(f"saves/{name}_train_loss.npy", self._train_loss_arr)
-        np.save(f"saves/{name}_val_loss.npy", self._val_loss_arr)
+
 
     def predict(self, image):
         """Predict the labels associated with image in image path"""
@@ -331,8 +350,6 @@ class PascalClassifier:
         else:
             outputs = self.model(features)
         output = torch.sigmoid(outputs[0])
-        # TODO: Test out prediction method
-        # TODO: Integrate prediction with GUI
         return output
 
 
@@ -407,7 +424,7 @@ def top_confidence_list():
 
     for i in range(k):
         ap_scikit = average_precision_score(
-            lab_reshape[i].cpu(), out_reshape[i].cpu())
+            lab_reshape[i].cpu(), out_reshape[i].cpu(), average="weighted")
         predictions = (out_reshape[i] > 0.5).float() * out_reshape[i]
         prediction_number = (out_reshape[i] > 0.5).sum()
         precision, location = torch.sort(predictions, dim=0, descending=True)
@@ -431,6 +448,9 @@ def top_confidence_list():
 
 # ==================================================== #
 
+# ====== Plot all loss and accuracy graphs for report ===== #
+# Not used in runtime
+
 
 def plot(name):
     tail_acc = torch.load(
@@ -453,12 +473,14 @@ def plot(name):
     y = list()
     for (key, values) in tail_acc.items():
         x.append(key.item())
-        y.append(values.sum().item()/20)
+        y.append(values.sum().item() / 20)
     plt.plot(x, y)
     plt.title(f"{name}_average_tail_accuracy")
     plt.xlabel("threshold")
     plt.savefig(f"saves/{name}_tail_acc.jpg")
     plt.close()
+
+# ========================================================= #
 
 
 def random_seeding(seed_value):
@@ -477,8 +499,8 @@ def main():
     # Initialize CUDA device
     device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
     # Run training and validation
-    pc = PascalClassifier(device=device, five_crop=True)
-    pc.run_trainval(max_epochs=1)
+    pc = PascalClassifier(device=device, five_crop=False)
+    pc.run_trainval(max_epochs=40)
 
 
 if __name__ == "__main__":
