@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import torch
+import json
 import numpy as np
 from sklearn.metrics import average_precision_score
 
@@ -19,7 +20,7 @@ def top_confidence_list():
     _, k = outputs_all.shape
     out_reshape = outputs_all.permute(1, 0)
     lab_reshape = labels_all.permute(1, 0)
-    pv = PascalVOC(DEFAULT_DATASET_DIR)
+    pv = PascalVOC("./VOCdevkit/VOC2012")
     json_output = dict()
 
     for i in range(k):
@@ -168,6 +169,7 @@ def plot_ap():
 if __name__ == "__main__":
     # plot("rand_rotate")
     # plot_tailacc()
-    plot_loss()
+    # plot_loss()
     # plot_accuracy()
     # plot_ap()
+    top_confidence_list()
