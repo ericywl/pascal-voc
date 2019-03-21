@@ -1,0 +1,26 @@
+{% extends "layout.html" %}
+
+{% block jumbo_title %}
+Pascal VOC App
+{% endblock %}
+
+{% block jumbo_subtitle %}
+Application for image prediction and viewing pre-computed validation
+ set predictions
+{% endblock %}
+
+{% block content %}
+<div class="row marketing">
+    <div class="col-lg-6">
+        <a class="btn btn-lg btn-block btn-outline-primary" href="/predict">
+            Predict labels for new image
+        </a>
+    </div>
+
+    <div class="col-lg-6">
+        <a class="btn btn-lg btn-block btn-outline-primary" href="/ranks">
+            View pre-computed top-ranked predictions
+        </a>
+    </div>
+</div>
+{% endblock %}

@@ -1,22 +1,43 @@
 # Pascal VOC Deep Learning Project
 
-
 ## Setup
 
 Install 2 things before running the code.
-- PyTorch for all things deep-learning
-- PyTorch TorchNet for the average precision measure, avoid reinventing the
-    wheel
+
+-   PyTorch for all things deep-learning
+-   Scikit-Learn only for the average precision measure, to avoid reinventing
+        the wheel
+-   Flask for the web server
 
 ```
 pip install torch
-pip install git+https://github.com/pytorch/tnt.git@master
+pip install sklearn
+pip install flask
 ```
 
 ## Instructions
-First, unpack the VOC tarfile, then run the Python scripts.
+
+### Training and validation
+
+First, unpack the VOC tarfile before running `pascal.py`.
 
 ```
-tar -xvf VOCtrainval_11-May-2012.tar
+tar -xvf ./VOCtrainval_11-May-2012.tar
 python pascal.py
 ```
+
+`pascal.py` will run for 40 epochs and save the outputs in `saves/` and the
+best model weights into `weights/`.
+
+### Web GUI
+
+To get the full experience of the web GUI (ranked image preview),
+unpack the VOC tarfile and copy the `JPEGImages` folder into `static/images`
+like so:
+
+```
+tar -xvf ./VOCtrainval_11-May-2012.tar
+cp -r ./VOCdevkit/VOC2012/JPEGImages/ ./static/images
+```
+
+Then, run `python app.py` and head to `localhost:5000` on a browser.
