@@ -7,7 +7,8 @@ Predict Image
 
 {% block jumbo_subtitle %}
 Upload an image to obtain it's label predictions and
- corresponding confidence scores
+ corresponding confidence scores<br>
+(Only support JPG images)
 {% endblock %}
 
 {% block content %}
@@ -17,7 +18,7 @@ Upload an image to obtain it's label predictions and
             <div class="z-depth-1-half mb-4 d-flex justify-content-center">
                 <img
                     id="image"
-                    src="https://mdbootstrap.com/img/Photos/Others/placeholder.jpg"
+                    src="static/images/placeholder.jpg"
                     class="img-thumbnail"
                     style="height: 450px"
                 />

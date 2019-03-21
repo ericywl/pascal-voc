@@ -2,31 +2,32 @@ window.onload = function() {
     document.getElementById("files").onchange = function() {
         const reader = new FileReader();
         reader.onload = function(e) {
-            // Get loaded data and render thumbnail.
             document.getElementById("image").src = e.target.result;
         };
         // Read the image file as a data URL.
-        reader.readAsDataURL(this.files[0]);
+        types = ["image/jpg", "image/jpeg"];
+        // Check file type is JPG image
+        if (types.indexOf(this.files[0].type) < 0) {
+            document.getElementById("preds").innerHTML =
+                "<div>Image must be in JPG format!</div>"
+            console.log("File must be JPG!");
+            return;
+        }
+        // Get loaded data and render thumbnail.
         document.getElementById("files-label").innerText = this.files[0].name;
         document.getElementById("predict-btn").disabled = false;
+        document.getElementById("preds").innerHTML = ""
+        reader.readAsDataURL(this.files[0]);
     };
 
     document.getElementById("predict-btn").onclick = function() {
         file = document.getElementById("files").files[0];
-        types = ["image/jpg", "image/jpeg", "image/png"];
-        // Check file type is image
-        if (types.indexOf(file.type) < 0) {
-            console.log("File must be JPEG or PNG!");
-            return;
-        }
-
         const reader = new FileReader();
         reader.onload = function(e) {
             const imgBlob = e.target.result;
             const json = { name: file.name, data: imgBlob };
             makePostRequest("/predict", json)
                 .then(function(resp) {
-                    console.log(resp);
                     let preds = document.getElementById("preds")
                     if (preds.classList.contains("d-flex")) {
                         preds.classList.remove("d-flex")
