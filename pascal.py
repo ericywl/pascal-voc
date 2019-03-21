@@ -15,9 +15,6 @@ from vocparse import PascalVOC
 
 
 DEFAULT_DATASET_DIR = "./VOCdevkit/VOC2012/"
-SEED = 2019
-USE_CUDA = True
-SAVE_OUTPUTS = True
 
 
 class ImageDataset(torch.utils.data.Dataset):
@@ -198,7 +195,8 @@ class PascalClassifier:
         val_loss /= len(val_loader)
         print(f"Average validation loss: {val_loss}")
         self._val_loss_arr.append(val_loss)
-        # Replace best_weights with current weights if validation loss is better
+        # Replace best_weights with current weights if validation loss is
+        # better
         if (self._best_loss < 0) or (val_loss < self._best_loss):
             self._best_loss = val_loss
             self.weights = self.model.state_dict()
@@ -411,6 +409,11 @@ def random_seeding(seed_value):
         torch.cuda.manual_seed_all(seed_value)
 
 
+SEED = 2019
+USE_CUDA = True
+SAVE_OUTPUTS = True
+
+
 def main():
     """Main function"""
     # Seeding if it's available
@@ -424,5 +427,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # top_confidence_list()
     # pascal_means_stds(True, 300, 280, 30)
