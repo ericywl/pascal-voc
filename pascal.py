@@ -1,7 +1,5 @@
-import PIL
 import random
-import json
-from pprint import pprint
+import PIL
 import numpy as np
 
 import torch
