@@ -402,50 +402,6 @@ def pascal_means_stds(five_crop, scale, crop_sz, rotation):
 # ================================================= #
 
 
-# ====== Generate json file for Flask web server ===== #
-# Not used in runtime
-
-
-def top_confidence_list():
-    """Rank the top predictions for each class and output as json"""
-    f_names = np.load('saves/five_crop_fnames.npy')
-    outputs_all = torch.load("saves/five_crop_outputs.pth",
-                             map_location=torch.device('cpu'))
-    labels_all = torch.load("saves/five_crop_labels.pth",
-                            map_location=torch.device('cpu'))
-    _, k = outputs_all.shape
-    out_reshape = outputs_all.permute(1, 0)
-    lab_reshape = labels_all.permute(1, 0)
-    pv = PascalVOC(DEFAULT_DATASET_DIR)
-    json_output = dict()
-
-    for i in range(k):
-        ap_scikit = average_precision_score(
-            lab_reshape[i].cpu(), out_reshape[i].cpu(), average="weighted")
-        predictions = (out_reshape[i] > 0.5).float() * out_reshape[i]
-        prediction_number = (out_reshape[i] > 0.5).sum()
-        precision, location = torch.sort(predictions, dim=0, descending=True)
-        urls = [f_names[j] for j in location]
-        corrects = [lab_reshape[i][j] for j in location]
-        json_output[i] = {
-            "class_name": pv.list_image_sets()[i],
-            "AP": ap_scikit
-        }
-        json_output[i]["images"] = [
-            {
-                "images_url": urls[j],
-                "confidence":precision[j].item(),
-                "correct":corrects[j].item()
-            } for j in range(prediction_number)
-        ]
-
-    with open('saves/ranks.json', 'w') as outfile:
-        json.dump(json_output, outfile, sort_keys=False,
-                  indent=4, ensure_ascii=False)
-
-# ==================================================== #
-
-
 def random_seeding(seed_value):
     """Seed all random functions for reproducibility"""
     if seed_value > 0:
