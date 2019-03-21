@@ -14,7 +14,30 @@ from sklearn.metrics import average_precision_score
 from vocparse import PascalVOC
 
 
+# CHANGE THESE VARIABLES IF NEEDED
+# Dataset folder, change if yours if somewhere else
 DEFAULT_DATASET_DIR = "./VOCdevkit/VOC2012/"
+# Seed for reproducibility
+SEED = 2019
+# Use GPU if set to True, else CPU
+USE_CUDA = True
+# Save graphs, arrays and tensors if set to True
+SAVE_OUTPUTS = False
+# Use FiveCrop if set to True, else RandRotCrop
+FIVE_CROP = True
+# Number of epochs to run
+MAX_EPOCHS = 40
+
+
+def main():
+    """Main function"""
+    # Seeding if it's available
+    random_seeding(SEED)
+    # Initialize CUDA device
+    device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
+    # Run training and validation
+    pc = PascalClassifier(device=device, five_crop=FIVE_CROP)
+    pc.run_trainval(max_epochs=MAX_EPOCHS)
 
 
 class ImageDataset(torch.utils.data.Dataset):
@@ -329,7 +352,7 @@ class PascalClassifier:
         self.measure_finalperf(val_loader)
 
     def predict(self, image):
-        """Predict the labels associated with image in image path"""
+        """Predict the labels associated with image"""
         if not self.weights:
             raise ValueError("Weights not found, can't do prediction.")
         self.model.load_state_dict(self.weights)
@@ -407,22 +430,6 @@ def random_seeding(seed_value):
         np.random.seed(seed_value)
         torch.manual_seed(seed_value)
         torch.cuda.manual_seed_all(seed_value)
-
-
-SEED = 2019
-USE_CUDA = True
-SAVE_OUTPUTS = True
-
-
-def main():
-    """Main function"""
-    # Seeding if it's available
-    random_seeding(SEED)
-    # Initialize CUDA device
-    device = torch.device("cuda") if USE_CUDA else torch.device("cpu")
-    # Run training and validation
-    pc = PascalClassifier(device=device, five_crop=True)
-    pc.run_trainval(max_epochs=40)
 
 
 if __name__ == "__main__":
