@@ -26,8 +26,9 @@ tar -xvf ./VOCtrainval_11-May-2012.tar
 python pascal.py
 ```
 
-`pascal.py` will run for 40 epochs and save the outputs in `saves/` and the
-best model weights into `weights/`.
+`pascal.py` will run for `MAX_EPOCHS` epochs, which we set to 40.
+Then it will save the outputs in `saves/` and the
+best model weights in `weights/` if `SAVE_OUTPUTS` is enabled.
 
 ### Web GUI
 
@@ -37,7 +38,7 @@ like so:
 
 ```
 tar -xvf ./VOCtrainval_11-May-2012.tar
-cp -r ./VOCdevkit/VOC2012/JPEGImages/ ./static/images
+cp ./VOCdevkit/VOC2012/JPEGImages/* ./static/images/
 ```
 
 Then, run `python app.py` and head to `localhost:5000` on a browser.
