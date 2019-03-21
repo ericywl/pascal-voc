@@ -2,17 +2,16 @@
 
 ## Setup
 
-Install 2 things before running the code.
+Install a few things before running the code.
 
--   PyTorch for all things deep-learning
+-   PyTorch and NumPy for all things deep-learning
 -   Scikit-Learn only for the average precision measure, to avoid reinventing
         the wheel
+-   Pandas for data parsing
 -   Flask for the web server
 
 ```
-pip install torch
-pip install sklearn
-pip install flask
+pip install torch numpy sklearn pandas flask
 ```
 
 ## Instructions
